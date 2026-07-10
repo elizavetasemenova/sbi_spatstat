@@ -49,8 +49,11 @@ convolutional summary network feeding a masked autoregressive flow---on
 simulations from a grid-discretized LGCP, and evaluate it with the field's most
 demanding diagnostics. The learned posterior passes simulation-based calibration
 on all three parameters (baseline intensity, spatial variance and correlation
-range) and attains near-nominal credible-interval coverage, whereas the common
-point-estimate ``regression'' approach is severely overconfident. Against a
+range) and attains near-nominal credible-interval coverage. The common
+point-estimate ``regression'' approach, by contrast, fails calibration in a way
+that only simulation-based calibration exposes: its intervals are right on
+average yet uninformative per dataset---their width barely varies and does not
+track the actual error---so they cannot flag which estimates to trust. Against a
 gold-standard No-U-Turn Sampler, the amortized posteriors are statistically
 indistinguishable---a classifier two-sample test accuracy of \CtstMean{} (chance
 $=0.5$)---yet are produced in \NpeMs{}~ms per dataset versus \McmcSec{}~s for
@@ -107,9 +110,10 @@ neural posterior estimation (NPE), pairing a convolutional summary network for t
 count field with a masked autoregressive flow over the three interpretable model
 parameters (Section~\ref{sec:method}).
 \item We subject the learned posterior to the strongest calibration diagnostics in
-the SBI toolkit---simulation-based calibration and credible-interval coverage---and
-show it passes on all parameters, while the widely used point-estimate regressor is
-badly miscalibrated (Section~\ref{sec:calibration}).
+the SBI toolkit---simulation-based calibration, marginal and \emph{conditional}
+coverage---and show it passes on all parameters, while the widely used
+point-estimate regressor is badly miscalibrated in a way that marginal coverage
+alone would miss (Section~\ref{sec:calibration}).
 \item We validate against a gold-standard No-U-Turn Sampler: the amortized
 posteriors are statistically indistinguishable from MCMC (classifier two-sample
 accuracy \CtstMean{}) at a $\sim\!\Speedup\times$ lower per-dataset cost, breaking
@@ -235,21 +239,40 @@ We evaluate on $\NTest$ held-out datasets drawn from the prior predictive.
 \paragraph{Simulation-based calibration.}
 SBC \citep{talts2018validating} exploits the fact that, if $q_\phi$ equals the
 true posterior, the rank of each true parameter within its posterior sample is
-uniform. Figure~\ref{fig:sbc} shows the rank empirical CDFs for all three
+uniform. Figure~\ref{fig:sbc} shows the NPE rank empirical CDFs for all three
 parameters lying inside the $95\%$ uniformity band, with $\chi^2$ uniformity
-$p$-values all above \SbcPmin{}: the amortized posterior is calibrated in the
-strong distributional sense SBC demands.
+$p$-values $\SbcNpeB/\SbcNpeS/\SbcNpeL$ (all $>0.05$): the amortized posterior is
+calibrated in the strong distributional sense SBC demands. The point-estimate
+regressor's ranks (orange) depart drastically from uniform ($p<0.01$ on every
+parameter), the signature of a posterior approximation that is systematically
+wrong per dataset.
 
-\paragraph{Coverage.}
+\paragraph{Marginal coverage.}
 Figure~\ref{fig:coverage} plots empirical against nominal central-interval
-coverage. The NPE (CNN$+$MAF) tracks the diagonal closely---$90\%$ intervals
-cover $\CovNpeB/\CovNpeS/\CovNpeL$ for $\beta_0/\sigma/\ell$---as does the
-hand-crafted-summary NPE. The point-estimate regressor, by contrast, is severely
-overconfident: its nominal $90\%$ intervals cover only
-$\CovRegB/\CovRegS/\CovRegL$. This is the central practical warning of the paper:
-inverting a simulator with a regression network yields point predictions with no
-usable uncertainty, whereas NPE yields a calibrated posterior at essentially the
-same training cost.
+coverage. Both NPE variants track the diagonal closely---the CNN$+$MAF model's
+$90\%$ intervals cover $\CovNpeB/\CovNpeS/\CovNpeL$ for $\beta_0/\sigma/\ell$.
+Strikingly, the regressor \emph{also} appears near-nominal here
+($\CovRegB/\CovRegS/\CovRegL$). This is not a contradiction of its failed SBC: a
+homoscedastic predictive whose width is tuned on held-out residuals is guaranteed
+to cover correctly \emph{on average over the prior}. Marginal coverage is
+necessary but not sufficient---and on its own it would have hidden the regressor's
+defect.
+
+\paragraph{Adaptive uncertainty.}
+SBC's verdict is made concrete by asking whether the reported uncertainty
+predicts the actual error. Figure~\ref{fig:adapt} bins datasets by their reported
+posterior standard deviation and plots the realised RMSE in each bin. For the NPE
+the two rise together along the diagonal---the posterior is \emph{sharper} on
+easy datasets and wider on hard ones---so its width is informative (correlation
+between reported SD and error $\CorrNpeB/\CorrNpeS/\CorrNpeL$ for
+$\beta_0/\sigma/\ell$). The regressor's homoscedastic predictive cannot do this:
+most starkly for $\beta_0$, whose intervals have a nearly constant width
+(coefficient of variation $\CvRegB$ versus $\CvNpeB$ for the NPE) and zero
+correlation with the error ($r=\CorrRegB$). This is why the regressor fails SBC
+while looking calibrated marginally, and it is the central practical warning of
+the paper: inverting a simulator with a regression network yields uncertainty
+that is uninformative per dataset, whereas NPE yields a calibrated, input-adaptive
+posterior at essentially the same training cost.
 
 \paragraph{Recovery.}
 Figure~\ref{fig:recovery} shows posterior means against truth. Abundance
@@ -264,19 +287,33 @@ not hidden.
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{figures/fig_sbc.pdf}
-\caption{Simulation-based calibration. Rank ECDFs (blue) for the three parameters
-fall within the $95\%$ uniformity band (grey); the diagonal is perfect
-calibration. Deviations would indicate bias (S-shape) or over/under-dispersion.}
+\caption{Simulation-based calibration. NPE rank ECDFs (blue) for the three
+parameters fall within the $95\%$ uniformity band (grey); the diagonal is perfect
+calibration. The point-estimate regressor (orange) departs sharply from uniform,
+revealing per-dataset miscalibration.}
 \label{fig:sbc}
 \end{figure}
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{figures/fig_coverage.pdf}
-\caption{Credible-interval calibration. The NPE methods track the diagonal;
-the point-estimate regressor (orange) is markedly overconfident, its intervals
-covering far less than nominal.}
+\caption{Marginal credible-interval calibration. All three methods track the
+diagonal: the regressor's tuned homoscedastic width makes it look calibrated
+\emph{marginally}, which Figure~\ref{fig:conditional} shows to be misleading.}
 \label{fig:coverage}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_adaptivity.pdf}
+\caption{Does the reported uncertainty predict the error? Datasets are binned by
+their posterior standard deviation ($x$); $y$ is the realised RMSE in each bin.
+NPE (blue) follows the diagonal---wider intervals where the error is genuinely
+larger---so its uncertainty is informative. The regressor (orange) is flat,
+especially for $\beta_0$: its fixed-width predictive says nothing about which
+estimates are reliable. This is the per-dataset miscalibration that SBC detects
+and marginal coverage hides.}
+\label{fig:adapt}
 \end{figure}
 
 \begin{figure}[t]
@@ -290,8 +327,11 @@ $y=x$.}
 
 \begin{table}[t]
 \centering
-\caption{Held-out accuracy and calibration ($\NTest$ datasets). NPE variants are
-calibrated (coverage $\approx0.90$); the regressor is overconfident.}
+\caption{Held-out accuracy and calibration ($\NTest$ datasets). Point-estimate
+accuracy (RMSE) and marginal $90\%$ coverage are similar across methods; the
+minimum SBC $p$-value (over the three parameters) separates them. The CNN$+$MAF
+NPE passes on all parameters ($\min p>0.05$); the hand-crafted-summary NPE is
+close but mildly miscalibrated; the regressor fails decisively ($\min p\approx0$).}
 \input{table_methods.tex}
 \label{tab:methods}
 \end{table}

@@ -64,24 +64,99 @@ def fig_data_examples():
 
 # ---------------------------------------------------------------------------
 def fig_sbc(arrays):
-    ranks = arrays["npe_ranks"]                # [M,3]
-    M = ranks.shape[0]; L = C.N_POSTERIOR
-    fig, axes = plt.subplots(1, 3, figsize=(9.2, 3.0))
+    npe = arrays["npe_ranks"]; reg = arrays["reg_ranks"]        # [M,3]
+    M = npe.shape[0]; L = C.N_POSTERIOR
+    fig, axes = plt.subplots(1, 3, figsize=(9.2, 3.1))
     grid, lo, hi = diag.sbc_ecdf_bands(200, L, M, alpha=0.05)
     for p in range(3):
         ax = axes[p]
         ax.fill_between(grid, lo, hi, color="#d9d9d6", alpha=0.9, lw=0,
                         label="95% band" if p == 0 else None)
-        r = np.sort(ranks[:, p] / L)
         ecdf = np.arange(1, M + 1) / M
-        ax.plot(r, ecdf, color=BLUE, lw=1.8)
+        ax.plot(np.sort(reg[:, p] / L), ecdf, color=ORANGE, lw=1.8,
+                label="regressor" if p == 0 else None)
+        ax.plot(np.sort(npe[:, p] / L), ecdf, color=BLUE, lw=1.8,
+                label="NPE (CNN+MAF)" if p == 0 else None)
         ax.plot([0, 1], [0, 1], color=GREY, lw=1.0, ls="--")
         ax.set_title(PNAMES[p]); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
         ax.set_xlabel("normalised rank")
         if p == 0:
-            ax.set_ylabel("ECDF"); ax.legend(loc="upper left")
-    fig.suptitle("Simulation-based calibration of the NPE posterior", fontsize=10)
+            ax.set_ylabel("ECDF"); ax.legend(loc="upper left", fontsize=8)
+    fig.suptitle("Simulation-based calibration: NPE ranks are uniform, "
+                 "the regressor's are not", fontsize=10)
     savefig(fig, "fig_sbc.pdf")
+
+
+def fig_adaptivity(cal):
+    """Does the reported uncertainty predict the actual error? (sharpness).
+
+    NPE posterior width varies across datasets and tracks the realised error;
+    the regressor's homoscedastic width does not---most starkly for beta0, whose
+    predictive width is essentially constant. This is the concrete failure that
+    SBC flags and that marginal coverage cannot see.
+    """
+    import torch
+    from sbilgcp.npe import NPE, CNNEmbedding, CNNRegressor
+
+    d = np.load(C.F_TEST)
+    theta = d["theta"].astype(np.float32); y = d["y"].astype(np.float32)
+    npe = NPE(CNNEmbedding(embedding_dim=48), n_transforms=5, hidden=64)
+    npe.load_state_dict(torch.load(C.F_NPE)); npe.eval()
+    reg = CNNRegressor(); reg.load_state_dict(torch.load(C.F_REG)); reg.eval()
+
+    yt = torch.as_tensor(y, dtype=torch.float32)
+    with torch.no_grad():
+        u = npe.sample(yt, n_per=C.N_POSTERIOR)
+        npe_s = lgcp.from_unconstrained(u.reshape(-1, 3)).reshape(
+            len(y), C.N_POSTERIOR, 3).numpy()
+        dtr = np.load(C.F_TRAIN)
+        ytr = torch.as_tensor(dtr["y"][:5000], dtype=torch.float32)
+        thtr_u = lgcp.to_unconstrained(torch.as_tensor(dtr["theta"][:5000], dtype=torch.float32))
+        resid = (reg(ytr) - thtr_u).std(0).numpy()
+        pred_u = reg(yt).numpy()
+    rng = np.random.default_rng(0)
+    draws = pred_u[:, None, :] + resid[None, None, :] * rng.standard_normal(
+        (len(y), C.N_POSTERIOR, 3))
+    reg_s = lgcp.from_unconstrained(torch.as_tensor(draws.reshape(-1, 3),
+             dtype=torch.float32)).reshape(len(y), C.N_POSTERIOR, 3).numpy()
+
+    sd_npe = npe_s.std(1); err_npe = np.abs(npe_s.mean(1) - theta)
+    sd_reg = reg_s.std(1); err_reg = np.abs(reg_s.mean(1) - theta)
+
+    fig, axes = plt.subplots(1, 3, figsize=(9.2, 3.2))
+    corr_npe, corr_reg = [], []
+    for p in range(3):
+        ax = axes[p]
+        hi = np.quantile(np.concatenate([sd_npe[:, p], sd_reg[:, p]]), 0.99)
+        bins = np.linspace(0, hi, 40)
+        ax.hist(sd_reg[:, p], bins=bins, density=True, color=ORANGE, alpha=0.75,
+                label="regressor" if p == 0 else None)
+        ax.hist(sd_npe[:, p], bins=bins, density=True, histtype="step",
+                color=BLUE, lw=1.8, label="NPE" if p == 0 else None)
+        cn = np.corrcoef(sd_npe[:, p], err_npe[:, p])[0, 1]
+        cr = np.corrcoef(sd_reg[:, p], err_reg[:, p])[0, 1]
+        corr_npe.append(cn); corr_reg.append(cr)
+        ax.set_title(f"{PNAMES[p]}   corr(SD, error): NPE {cn:.2f}, reg {cr:.2f}",
+                     fontsize=8.5)
+        ax.set_xlabel("reported posterior SD"); ax.set_yticks([])
+        if p == 0:
+            ax.set_ylabel("density across datasets")
+            ax.legend(loc="upper right", fontsize=8)
+    fig.suptitle("Adaptive uncertainty: NPE interval widths vary with the data and "
+                 "track the error; the regressor's are near-fixed", fontsize=9.5)
+    savefig(fig, "fig_adaptivity.pdf")
+
+    cv_reg_b0 = float(sd_reg[:, 0].std() / sd_reg[:, 0].mean())
+    cv_npe_b0 = float(sd_npe[:, 0].std() / sd_npe[:, 0].mean())
+    with open(C.ROOT + "/paper/numbers.tex", "a") as f:
+        f.write(f"\\newcommand{{\\CorrNpeB}}{{{corr_npe[0]:.2f}}}\n")
+        f.write(f"\\newcommand{{\\CorrNpeS}}{{{corr_npe[1]:.2f}}}\n")
+        f.write(f"\\newcommand{{\\CorrNpeL}}{{{corr_npe[2]:.2f}}}\n")
+        f.write(f"\\newcommand{{\\CorrRegB}}{{{corr_reg[0]:.2f}}}\n")
+        f.write(f"\\newcommand{{\\CvRegB}}{{{cv_reg_b0:.2f}}}\n")
+        f.write(f"\\newcommand{{\\CvNpeB}}{{{cv_npe_b0:.2f}}}\n")
+    print(f"adaptivity: corr NPE {np.round(corr_npe,2)} reg {np.round(corr_reg,2)}  "
+          f"cv(beta0) NPE {cv_npe_b0:.2f} reg {cv_reg_b0:.2f}")
 
 
 # ---------------------------------------------------------------------------
@@ -251,24 +326,23 @@ def fig_training(reports):
 # ---------------------------------------------------------------------------
 def write_tables(cal, cmp, reports):
     pm = PNAMES
-    def row(name, res, has_sbc=True):
-        rmse = res["rmse"]; r2 = res["r2"]
+    def row(name, res):
+        rmse = res["rmse"]
         cov90 = np.array(res["coverage"])[cal["levels"].index(0.9)]
-        cells = []
-        for p in range(3):
-            cells.append(f"{rmse[p]:.3f}")
-        for p in range(3):
-            cells.append(f"{cov90[p]:.2f}")
-        return f"{name} & " + " & ".join(cells) + r" \\"
+        pvals = res["sbc_pvalues"]
+        sbc = f"{min(pvals):.3f}"
+        cells = [f"{rmse[p]:.3f}" for p in range(3)]
+        cells += [f"{cov90[p]:.2f}" for p in range(3)]
+        return f"{name} & " + " & ".join(cells) + f" & {sbc}" + r" \\"
 
     with open(os.path.join(FIG, "..", "table_methods.tex"), "w") as f:
         f.write("% auto-generated\n")
-        f.write(r"\begin{tabular}{l ccc ccc}" + "\n\\toprule\n")
+        f.write(r"\begin{tabular}{l ccc ccc c}" + "\n\\toprule\n")
         f.write(r" & \multicolumn{3}{c}{RMSE $\downarrow$} & "
-                r"\multicolumn{3}{c}{90\% coverage (target 0.90)} \\" + "\n")
+                r"\multicolumn{3}{c}{90\% coverage} & SBC \\" + "\n")
         f.write(r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}" + "\n")
         f.write(r"Method & $\beta_0$ & $\sigma$ & $\ell$ & "
-                r"$\beta_0$ & $\sigma$ & $\ell$ \\" + "\n\\midrule\n")
+                r"$\beta_0$ & $\sigma$ & $\ell$ & $\min p$ \\" + "\n\\midrule\n")
         f.write(row("NPE (CNN+MAF)", cal["npe_cnn"]) + "\n")
         f.write(row("NPE (hand-crafted)", cal["npe_handcrafted"]) + "\n")
         f.write(row("CNN regressor", cal["regressor"]) + "\n")
@@ -298,6 +372,7 @@ def main():
     fig_data_examples()
     fig_sbc(arrays)
     fig_coverage(cal)
+    fig_adaptivity(cal)
     fig_recovery(arrays)
     fig_misspec(cal, arrays)
     fig_training(reports)

@@ -37,6 +37,13 @@ def main():
     cmd("CovRegB", f"{covr[0]:.2f}"); cmd("CovRegS", f"{covr[1]:.2f}"); cmd("CovRegL", f"{covr[2]:.2f}")
     pmin = min(cal["npe_cnn"]["sbc_pvalues"])
     cmd("SbcPmin", f"{pmin:.2f}")
+    # SBC p-values per parameter, NPE-CNN / handcrafted / regressor
+    pn = cal["npe_cnn"]["sbc_pvalues"]
+    ph = cal["npe_handcrafted"]["sbc_pvalues"]
+    pr = cal["regressor"]["sbc_pvalues"]
+    for lab, arr in [("Npe", pn), ("Hc", ph), ("Reg", pr)]:
+        for k, nm in zip(range(3), ("B", "S", "L")):
+            cmd(f"Sbc{lab}{nm}", f"{arr[k]:.2f}")
 
     # recovery R2 for NPE
     r2 = cal["npe_cnn"]["r2"]
