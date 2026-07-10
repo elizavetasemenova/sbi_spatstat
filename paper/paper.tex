@@ -1,0 +1,442 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{natbib}
+\usepackage{authblk}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,allcolors=blue!55!black]{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{microtype}
+
+\captionsetup{font=small,labelfont=bf}
+\setlength{\parskip}{0.15em}
+
+\input{numbers.tex}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\GP}{\mathcal{GP}}
+\newcommand{\Pois}{\mathrm{Poisson}}
+\newcommand{\thetavec}{\boldsymbol{\theta}}
+\newcommand{\xvec}{\mathbf{x}}
+
+\title{\bfseries Fast and Calibrated: Amortized Simulation-Based Inference\\
+for Log-Gaussian Cox Processes}
+
+\author[ ]{Elizaveta Semenova}
+\affil[ ]{\small Department of Epidemiology and Biostatistics, Imperial College London}
+
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+Log-Gaussian Cox processes (LGCPs) are the default model for aggregated spatial
+count and point-pattern data in ecology, epidemiology and the social sciences,
+but Bayesian inference for their parameters is costly: every dataset requires a
+fresh Markov chain Monte Carlo (MCMC) run that must repeatedly integrate over a
+high-dimensional latent Gaussian field. We show that \emph{amortized}
+simulation-based inference (SBI) removes this per-dataset cost while preserving
+the full Bayesian posterior. We train a neural posterior estimator---a
+convolutional summary network feeding a masked autoregressive flow---on
+simulations from a grid-discretized LGCP, and evaluate it with the field's most
+demanding diagnostics. The learned posterior passes simulation-based calibration
+on all three parameters (baseline intensity, spatial variance and correlation
+range) and attains near-nominal credible-interval coverage, whereas the common
+point-estimate ``regression'' approach is severely overconfident. Against a
+gold-standard No-U-Turn Sampler, the amortized posteriors are statistically
+indistinguishable---a classifier two-sample test accuracy of \CtstMean{} (chance
+$=0.5$)---yet are produced in \NpeMs{}~ms per dataset versus \McmcSec{}~s for
+MCMC, a per-dataset speed-up of $\sim\!\Speedup\times$ that repays its one-time
+training cost after only \BreakEven{} datasets. Finally, an honest kernel
+misspecification study shows the method degrades gracefully rather than failing
+silently. Amortized SBI thus makes calibrated, likelihood-free LGCP inference
+practical at the scale of modern spatial data.
+\end{abstract}
+
+\section{Introduction}
+
+Spatial point patterns---the locations of trees, disease cases, crimes, or animal
+sightings---are ubiquitous, and the \emph{log-Gaussian Cox process} (LGCP) is
+their canonical model \citep{moller1998log,diggle2013spatial}. An LGCP is a doubly
+stochastic Poisson process whose log-intensity surface is a Gaussian process (GP);
+its parameters---overall abundance, the strength of spatial aggregation, and the
+spatial scale over which that aggregation operates---are exactly the quantities
+ecologists and epidemiologists want to estimate and compare across regions,
+species or time periods.
+
+Inference is the bottleneck. The LGCP likelihood is intractable because it
+marginalizes a latent GP over the whole domain; in practice one discretizes the
+domain into a fine grid and treats the per-cell log-intensities as a
+high-dimensional latent Gaussian vector \citep{moller1998log}. Fully Bayesian
+inference then proceeds by MCMC over this vector jointly with the covariance
+parameters, which is slow and delicate because the Gaussian field and the
+covariance hyperparameters are strongly coupled \citep{christensen2005robust,
+murray2010elliptical}. Deterministic approximations such as INLA with an SPDE
+representation \citep{rue2009approximate,lindgren2011explicit} accelerate this
+enormously but are approximate, tied to Gaussian-Markov structure, and still
+solved \emph{per dataset}. In modern applications---disease mapping across
+thousands of administrative units, species distribution models over many taxa,
+or streaming crime data---the same model is fit again and again to structurally
+identical but numerically distinct datasets. Paying a full inference cost every
+time is wasteful.
+
+\emph{Amortized} simulation-based inference offers a different trade
+\citep{cranmer2020frontier}. One trains a neural conditional density estimator
+$q_\phi(\thetavec\mid\xvec)$ on pairs $(\thetavec,\xvec)$ drawn from the prior and
+the simulator, so that a single forward pass returns an approximate posterior for
+any new dataset $\xvec$. The cost of inference is moved \emph{up front} and
+\emph{shared} across all future datasets, and the method never evaluates the
+likelihood---only simulates from it---so it extends naturally to observation
+processes (thinning, preferential sampling, aggregation) that break analytic
+approaches. The question this paper answers is whether such amortized posteriors
+are \emph{trustworthy} for LGCPs: are they calibrated, and do they match what a
+careful MCMC analysis would have returned?
+
+\paragraph{Contributions.}
+\begin{enumerate}\itemsep2pt
+\item We cast Bayesian parameter inference for grid-discretized LGCPs as amortized
+neural posterior estimation (NPE), pairing a convolutional summary network for the
+count field with a masked autoregressive flow over the three interpretable model
+parameters (Section~\ref{sec:method}).
+\item We subject the learned posterior to the strongest calibration diagnostics in
+the SBI toolkit---simulation-based calibration and credible-interval coverage---and
+show it passes on all parameters, while the widely used point-estimate regressor is
+badly miscalibrated (Section~\ref{sec:calibration}).
+\item We validate against a gold-standard No-U-Turn Sampler: the amortized
+posteriors are statistically indistinguishable from MCMC (classifier two-sample
+accuracy \CtstMean{}) at a $\sim\!\Speedup\times$ lower per-dataset cost, breaking
+even after \BreakEven{} datasets (Section~\ref{sec:mcmc}).
+\item We report an honest robustness study under kernel misspecification, showing
+graceful rather than catastrophic degradation (Section~\ref{sec:misspec}).
+\end{enumerate}
+All code and experiments are released to reproduce every number and figure.
+
+\section{Background}
+
+\paragraph{Log-Gaussian Cox processes.}
+A Cox process on a domain $D\subset\R^2$ is a Poisson process with a random
+intensity $\Lambda(s)$. In an LGCP, $\log\Lambda(s)=Z(s)$ is a Gaussian process,
+$Z\sim\GP(\mu,k)$ \citep{moller1998log}. Discretizing $D$ into a regular
+$G\times G$ grid of cells with centroids $s_i$ and equal area $a$, the standard
+computational model \citep{diggle2013spatial} takes
+\begin{equation}
+Z_i = \beta_0 + f_i, \quad f\sim\N(\mathbf{0},K_{\thetavec}),\quad
+K_{ij}=\sigma^2\,\rho_\nu\!\big(\|s_i-s_j\|/\ell\big), \quad
+y_i \mid Z \sim \Pois\!\big(a\,e^{Z_i}\big),
+\label{eq:model}
+\end{equation}
+where $\rho_\nu$ is a Mat\'ern correlation of smoothness $\nu$ (we use the
+exponential kernel $\nu=\tfrac12$). The parameters
+$\thetavec=(\beta_0,\sigma,\ell)$ are the baseline log-intensity (abundance),
+the marginal standard deviation of the log-intensity field (aggregation /
+over-dispersion), and the correlation length (spatial scale of aggregation). The
+latent vector $f\in\R^{G^2}$ is a nuisance that must be integrated out; this is
+the source of both the modelling power and the computational difficulty.
+
+\paragraph{Neural posterior estimation.}
+Given a prior $p(\thetavec)$ and an implicit simulator $p(\xvec\mid\thetavec)$,
+NPE trains a conditional density estimator by minimizing the forward
+Kullback--Leibler divergence,
+\begin{equation}
+\phi^\star=\arg\min_\phi\ \E_{\thetavec\sim
+p(\thetavec)}\,\E_{\xvec\sim p(\xvec\mid\thetavec)}
+\big[-\log q_\phi(\thetavec\mid\xvec)\big],
+\label{eq:npe}
+\end{equation}
+whose minimizer is the true posterior $p(\thetavec\mid\xvec)$ when the family is
+flexible enough \citep{papamakarios2016fast,greenberg2019automatic}. We use a
+single-round (fully amortized) estimator so that, after training, inference on a
+new dataset is one forward pass. The density family is a masked autoregressive
+flow (MAF) \citep{papamakarios2017masked}, and the conditioning $\xvec$ is a
+learned summary of the count grid.
+
+\section{Method}
+\label{sec:method}
+
+\paragraph{Simulator and prior.}
+We work on the unit square discretized into a $\Grid\times\Grid$ grid
+($\NCells$ cells). The prior is
+$\beta_0\sim\N(5,0.7^2)$, $\sigma\sim\mathrm{U}(0.2,1.8)$,
+$\ell\sim\mathrm{U}(0.05,0.5)$, chosen so that prior-predictive patterns span
+sparse-to-dense and weakly-to-strongly aggregated regimes
+(Figure~\ref{fig:data}). Simulating from \eqref{eq:model} requires, per parameter
+draw, a Cholesky factor of the $\NCells\times\NCells$ covariance; we batch these
+on the CPU so that $\NTrain$ datasets are produced in about a minute.
+
+\paragraph{Parameter transform.}
+So that posterior samples always respect the (bounded) prior support, the flow
+operates on an unconstrained, standardized reparameterization: $\beta_0$ is
+$z$-scored and $\sigma,\ell$ are mapped through a logit of their rescaled uniform
+range and standardized. Densities and samples are transformed back to natural
+space with the exact change of variables.
+
+\paragraph{Summary network.}
+The count grid is passed through a small convolutional network
+(two $3\times3$ conv blocks, average pooling, two further conv blocks, global
+pooling) whose output is concatenated with two explicit global statistics
+(log total count and log count-variance) and projected to a 48-dimensional
+embedding. The convolutions exploit the spatial structure of the pattern, while
+the explicit total-count feature gives the network direct access to the strongest
+signal for abundance.
+
+\paragraph{Density estimator.}
+The embedding conditions a MAF with five autoregressive transforms (each a
+conditional MADE with two hidden layers of width 64 and $\tanh$-bounded
+log-scales for stability), with the variable order reversed between transforms.
+The whole model (\NpeParams{} parameters) is trained end-to-end by
+minimizing~\eqref{eq:npe} on the $\NTrain$ simulations with Adam, early stopping
+on a validation split; training takes \TrainMin{} minutes on four CPU cores.
+At test time we draw $\NPost$ posterior samples per dataset.
+
+\paragraph{Baselines.}
+We compare against (i) an otherwise identical NPE that consumes \emph{hand-crafted}
+spatial summaries---global count statistics, the index of dispersion, and a
+binned spatial autocorrelation profile of the log-count field---instead of the
+learned CNN embedding; and (ii) a \emph{point-estimate CNN regressor} trained by
+mean-squared error, representing the common practice of ``learning to invert''
+a simulator. To place the regressor on the same calibration axes we equip it with
+a homoscedastic Gaussian predictive whose scale is its training residual standard
+deviation.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_data_examples.pdf}
+\caption{Prior-predictive LGCP realisations on the $\Grid\times\Grid$ grid.
+Top: latent log-intensity fields $Z$; bottom: the observed Poisson counts $y$.
+Increasing $\sigma$ (left$\to$right pairs) strengthens aggregation; increasing
+$\ell$ enlarges the spatial scale of that aggregation. Inference must recover
+these parameters from a \emph{single} count grid.}
+\label{fig:data}
+\end{figure}
+
+\paragraph{Gold-standard reference.}
+As a reference posterior we run the No-U-Turn Sampler (NUTS)
+\citep{hoffman2014no} on the \emph{same} model and priors, using a non-centred
+parameterization $f=L_{\thetavec}\,\eta$, $\eta\sim\N(\mathbf 0, I)$, where the
+Cholesky factor $L_{\thetavec}$ is rebuilt at every leapfrog step because it
+depends on the sampled length-scale $\ell$. This per-step re-factorization is
+exactly the cost that amortization avoids. We run
+$\MCMCchains$ chains of $\MCMCwarm{+}\MCMCsamp$ iterations and monitor
+split-$\hat R$.
+
+\section{Calibration and recovery}
+\label{sec:calibration}
+
+We evaluate on $\NTest$ held-out datasets drawn from the prior predictive.
+
+\paragraph{Simulation-based calibration.}
+SBC \citep{talts2018validating} exploits the fact that, if $q_\phi$ equals the
+true posterior, the rank of each true parameter within its posterior sample is
+uniform. Figure~\ref{fig:sbc} shows the rank empirical CDFs for all three
+parameters lying inside the $95\%$ uniformity band, with $\chi^2$ uniformity
+$p$-values all above \SbcPmin{}: the amortized posterior is calibrated in the
+strong distributional sense SBC demands.
+
+\paragraph{Coverage.}
+Figure~\ref{fig:coverage} plots empirical against nominal central-interval
+coverage. The NPE (CNN$+$MAF) tracks the diagonal closely---$90\%$ intervals
+cover $\CovNpeB/\CovNpeS/\CovNpeL$ for $\beta_0/\sigma/\ell$---as does the
+hand-crafted-summary NPE. The point-estimate regressor, by contrast, is severely
+overconfident: its nominal $90\%$ intervals cover only
+$\CovRegB/\CovRegS/\CovRegL$. This is the central practical warning of the paper:
+inverting a simulator with a regression network yields point predictions with no
+usable uncertainty, whereas NPE yields a calibrated posterior at essentially the
+same training cost.
+
+\paragraph{Recovery.}
+Figure~\ref{fig:recovery} shows posterior means against truth. Abundance
+$\beta_0$ and aggregation $\sigma$ are recovered well; the correlation length
+$\ell$ is intrinsically harder to pin down from a single realization, and---
+importantly---the NPE \emph{reports} this through wider, still-calibrated
+intervals rather than confident errors. Coefficients of determination are
+$\RtwoB/\RtwoS/\RtwoL$. The weaker identifiability of $\beta_0$ against the field
+mean (a known feature of LGCPs) is faithfully reflected in the posterior width,
+not hidden.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_sbc.pdf}
+\caption{Simulation-based calibration. Rank ECDFs (blue) for the three parameters
+fall within the $95\%$ uniformity band (grey); the diagonal is perfect
+calibration. Deviations would indicate bias (S-shape) or over/under-dispersion.}
+\label{fig:sbc}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_coverage.pdf}
+\caption{Credible-interval calibration. The NPE methods track the diagonal;
+the point-estimate regressor (orange) is markedly overconfident, its intervals
+covering far less than nominal.}
+\label{fig:coverage}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_recovery.pdf}
+\caption{Posterior recovery on held-out simulations. Points are posterior means
+with $90\%$ credible intervals against the true parameter; the dashed line is
+$y=x$.}
+\label{fig:recovery}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{Held-out accuracy and calibration ($\NTest$ datasets). NPE variants are
+calibrated (coverage $\approx0.90$); the regressor is overconfident.}
+\input{table_methods.tex}
+\label{tab:methods}
+\end{table}
+
+\section{Agreement with gold-standard MCMC}
+\label{sec:mcmc}
+
+Calibration shows the posterior is right \emph{on average} over the prior; we now
+ask whether it is right \emph{for individual datasets} by comparing, dataset by
+dataset, against NUTS. We ran NUTS on \NCompared{} test datasets that reached
+convergence ($\hat R<1.1$).
+
+Figure~\ref{fig:mcmc} tells the story. The overlaid marginal posteriors (top)
+are nearly coincident with the NUTS reference for a representative dataset. The
+posterior means agree tightly (correlation $\ge\MeanCorrMin$ across parameters)
+and, crucially, so do the posterior \emph{standard deviations}---the NPE is not
+merely locating the posterior but reproducing its spread. Aggregated over
+datasets, a classifier two-sample test cannot tell NPE from NUTS samples apart:
+mean C2ST accuracy is \CtstMean{} against a chance level of $0.5$, and the mean
+marginal $1$-Wasserstein distance is only \WassMean{} prior standard deviations.
+Table~\ref{tab:mcmc} collects these numbers.
+
+The practical pay-off is in Figure~\ref{fig:amort}. A single NUTS fit takes
+\McmcSec{}~s; an amortized NPE posterior takes \NpeMs{}~ms, a
+$\sim\!\Speedup\times$ per-dataset speed-up. Accounting for the one-time
+\TrainMin-minute training cost, NPE overtakes repeated MCMC after just
+\BreakEven{} datasets---a threshold trivially exceeded in any realistic
+multi-region or multi-species study.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_npe_vs_mcmc.pdf}
+\caption{NPE versus gold-standard NUTS. \emph{Top:} overlaid marginal posteriors
+for one held-out dataset (NPE step outline, NUTS filled, truth dashed).
+\emph{Bottom:} across datasets, posterior means and standard deviations agree
+with NUTS, and the classifier two-sample accuracy concentrates near the chance
+level $0.5$ (indistinguishable posteriors).}
+\label{fig:mcmc}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_amortization.pdf}
+\caption{Amortization. \emph{Left:} cumulative wall-clock against number of
+datasets; the NPE line (training cost $+$ near-free inference) crosses the
+per-dataset MCMC line after \BreakEven{} datasets. \emph{Right:} per-dataset cost
+on a log scale.}
+\label{fig:amort}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{Per-parameter agreement between NPE and NUTS over \NCompared{} datasets.
+C2ST is computed on the joint $3$-D posteriors (0.5 = indistinguishable).}
+\input{table_mcmc.tex}
+\label{tab:mcmc}
+\end{table}
+
+\section{Robustness to misspecification}
+\label{sec:misspec}
+
+A method that is only validated in-distribution can fail silently when the world
+does not match the simulator. We therefore train on the exponential ($\nu=\tfrac12$)
+kernel but \emph{test} on data generated from rougher-to-smoother Mat\'ern
+kernels ($\nu=\tfrac32,\tfrac52$), a realistic form of model mismatch since the
+true smoothness is rarely known. Figure~\ref{fig:misspec} shows coverage
+degrading gracefully: intervals remain informative and only mildly
+miscalibrated under moderate mismatch (at $\nu=\tfrac52$, $90\%$ coverage
+$\CovMisB/\CovMisS/\CovMisL$), with $\ell$---whose meaning is most kernel-dependent
+---the most affected. The failure mode is gradual and diagnosable rather than
+catastrophic, and it is detectable in practice with the same SBC/coverage tools
+used above, supporting a workflow in which the simulator's smoothness is itself
+treated as uncertain.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_misspec.pdf}
+\caption{Kernel misspecification. Coverage of the NPE (trained on $\nu=\tfrac12$)
+under test data from $\nu=\tfrac12$ (well-specified), $\tfrac32$ and $\tfrac52$.
+Degradation is gradual and largest for the range $\ell$.}
+\label{fig:misspec}
+\end{figure}
+
+\section{Related work}
+
+\paragraph{Simulation-based inference.}
+NPE originates with mixture-density and flow-based conditional estimators
+\citep{papamakarios2016fast}, refined by sequential and automatic-posterior
+variants \citep{lueckmann2017flexible,greenberg2019automatic} and surveyed by
+\citet{cranmer2020frontier}. Alternatives estimate the likelihood
+\citep{papamakarios2019sequential} or the likelihood ratio
+\citep{hermans2020likelihood}; \citet{lueckmann2021benchmarking} benchmark them.
+Our density estimator is a masked autoregressive flow
+\citep{papamakarios2017masked,rezende2015variational}. Calibration is assessed
+with simulation-based calibration \citep{talts2018validating} and the classifier
+two-sample test \citep{lopez2017revisiting}; recent work stresses that SBI must be
+checked, not assumed \citep{hermans2022trust}.
+
+\paragraph{Inference for LGCPs and spatial models.}
+Classical LGCP inference uses MCMC over the latent field
+\citep{moller1998log,christensen2005robust}, with elliptical slice sampling and
+manifold methods to cope with the field--hyperparameter coupling
+\citep{murray2010elliptical,girolami2011riemann}. INLA with an SPDE
+representation \citep{rue2009approximate,lindgren2011explicit,simpson2016going}
+is the dominant fast, approximate alternative. These are all \emph{per-dataset}
+solvers; our contribution is orthogonal---an amortized posterior shared across
+datasets---and complementary, since INLA or NUTS can serve as the gold standard
+we validate against.
+
+\paragraph{SBI for spatial and point-process models.}
+Amortized inference has begun to reach spatial statistics and ecology, including
+neural estimators for spatial covariance parameters and point processes
+\citep{gerber2021fast,lenzi2023neural,sainsbury2024likelihood}. We add to this
+line a focused, rigorously validated treatment of the LGCP that (i) delivers a
+\emph{full calibrated posterior} rather than a point estimate, and (ii)
+benchmarks it head-to-head against gold-standard MCMC in both fidelity and cost.
+
+\section{Discussion}
+
+We have shown that amortized NPE gives calibrated posteriors for LGCP parameters
+that match gold-standard MCMC at a fraction of the per-dataset cost, and that the
+common regression shortcut, while accurate in the mean, is dangerously
+overconfident. The recipe is simple and dependency-light: simulate, embed with a
+CNN, fit a flow, and---critically---\emph{check} with SBC, coverage and a
+gold-standard comparison before trusting the result.
+
+\paragraph{Limitations and outlook.}
+Our study fixes the grid resolution and the kernel family, infers three global
+parameters, and does not reconstruct the latent field; the misspecification
+analysis shows real sensitivity to smoothness. Natural extensions are to amortize
+over grid resolution and domain shape, to jointly infer the latent intensity
+surface (a spatial prediction task), to add covariates and non-stationarity, and
+to handle realistic observation processes---thinning, preferential sampling and
+aggregation---where the likelihood-free nature of SBI is decisive and analytic
+competitors do not apply. Treating the kernel smoothness as an inferred parameter,
+rather than a fixed modelling choice, is a promising route to robustness. We view
+calibrated amortized inference as a practical path to LGCP modelling at the scale
+that contemporary spatial data demand.
+
+\paragraph{Reproducibility.}
+The simulator, method, diagnostics and all experiment scripts are released; every
+figure and number in this paper is regenerated by the accompanying code.
+
+\small
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}
