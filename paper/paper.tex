@@ -42,9 +42,11 @@ Log-Gaussian Cox processes (LGCPs) are the default model for aggregated spatial
 count and point-pattern data in ecology, epidemiology and the social sciences,
 but Bayesian inference for their parameters is costly: every dataset requires a
 fresh Markov chain Monte Carlo (MCMC) run that must repeatedly integrate over a
-high-dimensional latent Gaussian field. We show that \emph{amortized}
-simulation-based inference (SBI) removes this per-dataset cost while preserving
-the full Bayesian posterior. We train a neural posterior estimator---a
+high-dimensional latent Gaussian field. \emph{Amortized} simulation-based
+inference (SBI) removes this per-dataset cost while preserving the full Bayesian
+posterior, and recent work has shown it is feasible for LGCPs; the open question
+is whether the resulting posteriors can be \emph{trusted}. We answer it with a
+systematic calibration audit. We train a neural posterior estimator---a
 convolutional summary network feeding a masked autoregressive flow---on
 simulations from a grid-discretized LGCP, and evaluate it with the field's most
 demanding diagnostics. The learned posterior passes simulation-based calibration
@@ -92,32 +94,49 @@ identical but numerically distinct datasets. Paying a full inference cost every
 time is wasteful.
 
 \emph{Amortized} simulation-based inference offers a different trade
-\citep{cranmer2020frontier}. One trains a neural conditional density estimator
-$q_\phi(\thetavec\mid\xvec)$ on pairs $(\thetavec,\xvec)$ drawn from the prior and
-the simulator, so that a single forward pass returns an approximate posterior for
-any new dataset $\xvec$. The cost of inference is moved \emph{up front} and
-\emph{shared} across all future datasets, and the method never evaluates the
-likelihood---only simulates from it---so it extends naturally to observation
-processes (thinning, preferential sampling, aggregation) that break analytic
-approaches. The question this paper answers is whether such amortized posteriors
-are \emph{trustworthy} for LGCPs: are they calibrated, and do they match what a
-careful MCMC analysis would have returned?
+\citep{cranmer2020frontier,zammitmangion2025neural}. One trains a neural
+conditional density estimator $q_\phi(\thetavec\mid\xvec)$ on pairs
+$(\thetavec,\xvec)$ drawn from the prior and the simulator, so that a single
+forward pass returns an approximate posterior for any new dataset $\xvec$. The
+cost of inference is moved \emph{up front} and \emph{shared} across all future
+datasets, and the method never evaluates the likelihood---only simulates from
+it---so it extends naturally to observation processes (thinning, preferential
+sampling, aggregation) that break analytic approaches.
+
+This idea has already reached the LGCP: \citet{wang2025inference} apply the
+BayesFlow amortized estimator \citep{radev2020bayesflow} to one- and
+two-dimensional LGCPs and validate it against MCMC, and a broader line of work
+uses neural networks to estimate spatial point-process parameters as point
+predictions \citep{vihrs2022using}. Feasibility, in other words, is established.
+The question we take up is the next one, and the one that decides whether such
+estimators can be \emph{used}: are the amortized posteriors \emph{trustworthy}?
+Concretely---do they pass the field's strongest calibration diagnostics across
+the whole prior, not just agree with MCMC on a handful of cases; how do they
+compare with the prevailing point-estimate paradigm; what does the choice of
+summary statistics cost in calibration; and how do they behave when the
+simulator is misspecified? This paper is a systematic answer to those questions.
 
 \paragraph{Contributions.}
+Building on the feasibility established by prior amortized LGCP work
+\citep{wang2025inference}, our contribution is a rigorous validation and a set of
+controlled comparisons, using a transparent, dependency-light neural posterior
+estimator (a convolutional summary network feeding a masked autoregressive flow
+over the three interpretable parameters; Section~\ref{sec:method}):
 \begin{enumerate}\itemsep2pt
-\item We cast Bayesian parameter inference for grid-discretized LGCPs as amortized
-neural posterior estimation (NPE), pairing a convolutional summary network for the
-count field with a masked autoregressive flow over the three interpretable model
-parameters (Section~\ref{sec:method}).
 \item We subject the learned posterior to the strongest calibration diagnostics in
-the SBI toolkit---simulation-based calibration, marginal and \emph{conditional}
-coverage---and show it passes on all parameters, while the widely used
-point-estimate regressor is badly miscalibrated in a way that marginal coverage
-alone would miss (Section~\ref{sec:calibration}).
-\item We validate against a gold-standard No-U-Turn Sampler: the amortized
-posteriors are statistically indistinguishable from MCMC (classifier two-sample
-accuracy \CtstMean{}) at a $\sim\!\Speedup\times$ lower per-dataset cost, breaking
-even after \BreakEven{} datasets (Section~\ref{sec:mcmc}).
+the SBI toolkit---simulation-based calibration over the full prior, plus marginal
+coverage and an \emph{adaptive-uncertainty} analysis---and show it passes on all
+three parameters (Section~\ref{sec:calibration}).
+\item We run a controlled comparison against the prevailing point-estimate
+paradigm \citep{vihrs2022using}: a regression network matches the NPE on
+point-estimate accuracy yet is badly miscalibrated in a way that marginal coverage
+alone would miss, because its uncertainty does not adapt to the data
+(Section~\ref{sec:calibration}). We further ablate learned versus hand-crafted
+spatial summary statistics.
+\item We benchmark against a gold-standard No-U-Turn Sampler in two dimensions:
+the amortized posteriors are statistically indistinguishable from MCMC (classifier
+two-sample accuracy \CtstMean{}) at a $\sim\!\Speedup\times$ lower per-dataset
+cost, breaking even after \BreakEven{} datasets (Section~\ref{sec:mcmc}).
 \item We report an honest robustness study under kernel misspecification, showing
 graceful rather than catastrophic degradation (Section~\ref{sec:misspec}).
 \end{enumerate}
@@ -441,13 +460,28 @@ solvers; our contribution is orthogonal---an amortized posterior shared across
 datasets---and complementary, since INLA or NUTS can serve as the gold standard
 we validate against.
 
-\paragraph{SBI for spatial and point-process models.}
-Amortized inference has begun to reach spatial statistics and ecology, including
-neural estimators for spatial covariance parameters and point processes
-\citep{gerber2021fast,lenzi2023neural,sainsbury2024likelihood}. We add to this
-line a focused, rigorously validated treatment of the LGCP that (i) delivers a
-\emph{full calibrated posterior} rather than a point estimate, and (ii)
-benchmarks it head-to-head against gold-standard MCMC in both fidelity and cost.
+\paragraph{Neural inference for spatial and point-process models.}
+Amortized and likelihood-free neural inference has moved rapidly into spatial
+statistics and ecology; see \citet{zammitmangion2025neural} for a review. Two
+threads are directly relevant. The first estimates parameters as \emph{point
+predictions}: \citet{vihrs2022using} trains neural networks to recover
+spatial point-process parameters from a pattern, and neural Bayes estimators
+provide fast, amortized point estimators for spatial covariance and extremal
+models, with bootstrap uncertainty
+\citep{gerber2021fast,lenzi2023neural,sainsbury2024likelihood,sainsbury2023neural}.
+Our regressor baseline is a representative of this thread, and our calibration
+analysis quantifies precisely what its uncertainty does and does not deliver. The
+second thread learns \emph{full posteriors}: closest to us,
+\citet{wang2025inference} apply BayesFlow \citep{radev2020bayesflow} to one- and
+two-dimensional LGCPs and validate against MCMC on selected realizations, with an
+oral-microbiome application. We are complementary to that work: rather than a new
+application, we contribute a systematic \emph{trustworthiness audit}---calibration
+across the entire prior via SBC, a controlled comparison against the
+point-estimate paradigm, a summary-statistic ablation, a classifier-two-sample
+and Wasserstein benchmark against MCMC in two dimensions, and a
+kernel-misspecification stress
+test---using a deliberately minimal, from-scratch estimator so that the
+conclusions are about the approach, not a particular software stack.
 
 \section{Discussion}
 
