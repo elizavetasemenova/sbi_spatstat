@@ -95,6 +95,54 @@ def run_nuts(
     return {"theta": theta, "wall": wall, "rhat": rhat}
 
 
+def make_preferential_model(coords, area, nu=0.5, jitter=1e-5):
+    """Joint model of the observation mask r and counts y under preferential
+    sampling: r_i ~ Bernoulli(sigmoid(gamma f_i)), y_i ~ Poisson(area e^{Z_i})
+    observed where r_i = 1.  Gold-standard reference for the design-aware NPE.
+    """
+    dist_m = _dist_matrix(jnp.asarray(coords))
+    n = coords.shape[0]
+    eye = jnp.eye(n)
+
+    def model(r, y):
+        beta0 = numpyro.sample("beta0", dist.Normal(lgcp.BETA0_MEAN, lgcp.BETA0_SD))
+        sigma = numpyro.sample("sigma", dist.Uniform(lgcp.SIGMA_LOW, lgcp.SIGMA_HIGH))
+        ell = numpyro.sample("ell", dist.Uniform(lgcp.ELL_LOW, lgcp.ELL_HIGH))
+        gamma = numpyro.sample("gamma", dist.Uniform(0.0, 3.0))
+        corr = _matern_corr(dist_m, ell, nu)
+        cov = sigma ** 2 * corr + jitter * eye
+        L = jnp.linalg.cholesky(cov)
+        eta = numpyro.sample("eta", dist.Normal(0.0, 1.0).expand([n]))
+        f = L @ eta
+        logit_pi = gamma * f
+        numpyro.sample("r", dist.Bernoulli(logits=logit_pi), obs=r)
+        log_rate = beta0 + f + jnp.log(area)
+        with numpyro.handlers.mask(mask=(r > 0.5)):
+            numpyro.sample("y", dist.Poisson(jnp.exp(log_rate)), obs=y)
+
+    return model
+
+
+def run_nuts_preferential(
+    r_grid, y_grid, coords, area, nu=0.5,
+    num_warmup=600, num_samples=500, num_chains=2, seed=0,
+):
+    r = jnp.asarray(np.asarray(r_grid).reshape(-1).astype(np.float32))
+    y = jnp.asarray(np.asarray(y_grid).reshape(-1).astype(np.float32))
+    model = make_preferential_model(coords, area, nu=nu)
+    kernel = NUTS(model, target_accept_prob=0.9, max_tree_depth=8)
+    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples,
+                num_chains=num_chains, chain_method="sequential", progress_bar=False)
+    t0 = time.time()
+    mcmc.run(jax.random.PRNGKey(seed), r=r, y=y)
+    wall = time.time() - t0
+    s = mcmc.get_samples()
+    theta = np.stack([np.asarray(s[k]) for k in ("beta0", "sigma", "ell", "gamma")], axis=1)
+    grouped = mcmc.get_samples(group_by_chain=True)
+    rhat = {k: float(_split_rhat(np.asarray(grouped[k]))) for k in ("beta0", "sigma", "ell", "gamma")}
+    return {"theta": theta, "wall": wall, "rhat": rhat}
+
+
 def _split_rhat(x):
     """Split-Rhat for array [chains, draws]."""
     m, n = x.shape

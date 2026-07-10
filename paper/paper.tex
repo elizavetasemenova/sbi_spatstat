@@ -60,10 +60,14 @@ gold-standard No-U-Turn Sampler, the amortized posteriors are statistically
 indistinguishable---a classifier two-sample test accuracy of \CtstMean{} (chance
 $=0.5$)---yet are produced in \NpeMs{}~ms per dataset versus \McmcSec{}~s for
 MCMC, a per-dataset speed-up of $\sim\!\Speedup\times$ that repays its one-time
-training cost after only \BreakEven{} datasets. Finally, an honest kernel
-misspecification study shows the method degrades gracefully rather than failing
-silently. Amortized SBI thus makes calibrated, likelihood-free LGCP inference
-practical at the scale of modern spatial data.
+training cost after only \BreakEven{} datasets. Finally, we exploit the
+likelihood-free nature of the approach to go beyond the standard model:
+under \emph{preferential sampling}, where observation locations are informative
+and the usual analysis is biased, adding the design to the simulator yields a
+design-aware estimator that is unbiased and calibrated and additionally recovers
+the strength of the preferentiality---at no extra methodological cost. Amortized
+SBI thus makes calibrated LGCP inference not only fast but extensible to
+observation processes that defeat likelihood-based tools.
 \end{abstract}
 
 \section{Introduction}
@@ -139,6 +143,12 @@ two-sample accuracy \CtstMean{}) at a $\sim\!\Speedup\times$ lower per-dataset
 cost, breaking even after \BreakEven{} datasets (Section~\ref{sec:mcmc}).
 \item We report an honest robustness study under kernel misspecification, showing
 graceful rather than catastrophic degradation (Section~\ref{sec:misspec}).
+\item \textbf{A methodological extension} that goes beyond prior amortized LGCP
+work: inference under \emph{preferential sampling}. Because the informative
+design is just part of the simulator, a design-aware NPE corrects the bias that
+the standard ignorable-design analysis suffers, stays calibrated, and recovers
+the preferentiality parameter---validated against a joint-model NUTS reference
+(Section~\ref{sec:pref}).
 \end{enumerate}
 All code and experiments are released to reproduce every number and figure.
 
@@ -434,6 +444,98 @@ Degradation is gradual and largest for the range $\ell$.}
 \label{fig:misspec}
 \end{figure}
 
+\section{Amortized inference under preferential sampling}
+\label{sec:pref}
+
+The results so far establish that amortized NPE is a \emph{trustworthy} drop-in
+for MCMC on the standard, fully observed LGCP---the setting of prior amortized
+work \citep{wang2025inference}. We now turn the argument around and use
+amortization to do something the standard toolkit finds genuinely hard, showing
+that the likelihood-free nature of SBI is not just a convenience but a modelling
+capability.
+
+\paragraph{The problem.}
+Classical LGCP inference assumes the observation locations are chosen
+independently of the latent field---an \emph{ignorable} design. Frequently they
+are not: monitors are sited where pollution is expected, sightings are logged
+where animals are abundant, tissue is sampled where a biofilm looks dense. Under
+such \emph{preferential sampling} \citep{diggle2010geostatistical}, the observed
+locations carry information about the field, and an analysis that ignores this
+is biased---typically overstating abundance and variability, because one
+preferentially sees high-intensity locations. Correcting it with likelihood-based
+tools requires building and fitting a bespoke \emph{joint} model of the field,
+the counts, and the sampling mechanism, redone for every design.
+
+\paragraph{An amortized, likelihood-free treatment.}
+For SBI the correction is almost free: the design is simply part of the
+simulator. We augment the generator with a preferential observation model in
+which cell $i$ is observed with probability $\pi_i=\mathrm{sigmoid}(\gamma f_i)$,
+where $f_i=Z_i-\beta_0$ is the mean-zero field and $\gamma\ge 0$ controls the
+strength of preferentiality ($\gamma=0$ recovers a uniform design). The data are
+the observed counts together with the observation mask, and the unknowns are now
+$(\beta_0,\sigma,\ell,\gamma)$. We train a \emph{design-aware} NPE on this
+generator---a two-channel convolutional summary (masked log-counts and the mask
+itself) feeding the flow---and, for contrast, a \emph{design-ignorant} NPE that
+embodies the standard assumption: it is trained on uniform-design simulations
+and applied, as a practitioner would, to preferentially sampled data. No new
+derivation is needed for either; only the simulator changes.
+
+\paragraph{Results.}
+Figure~\ref{fig:prefbias} and Table~\ref{tab:pref} tell the story on
+$\NTest$ preferentially sampled test datasets. The design-ignorant analysis is
+biased, and increasingly so as preferentiality grows: at the strongest
+$\gamma$ it overestimates the baseline intensity and the spatial variance
+(overall bias $\PrefBiasNaiveBeta$ in $\beta_0$ and $\PrefBiasNaiveSig$ in
+$\sigma$), and its credible intervals are miscalibrated (minimum $90\%$ coverage
+$\PrefCovNaiveMin$, SBC $p=\PrefSbcNaive$). The design-aware NPE is essentially
+unbiased across the whole range of $\gamma$ (bias $\PrefBiasPsBeta$ and
+$\PrefBiasPsSig$), restores calibration (minimum coverage $\PrefCovPsMin$, SBC
+$p=\PrefSbcPs$), and---as a bonus the ignorable analysis cannot provide---infers
+the preferentiality itself ($\gamma$ recovered with $R^2=\GammaRtwo$;
+Figure~\ref{fig:prefgamma}). A gold-standard NUTS sampler for the joint
+preferential model confirms the design-aware posterior is correct, not merely
+self-consistent: the two are indistinguishable (C2ST $\PrefCtst$ over
+$\PrefNCompared$ datasets).
+
+\paragraph{Why this matters.}
+Preferential sampling is one instance of a general pattern. Thinning,
+detection error, aggregation to coarse regions, and preferential or adaptive
+designs all change the \emph{observation} model while leaving the latent LGCP
+intact, and all break the clean likelihoods that INLA-style methods rely on.
+For amortized SBI each is a change to a few lines of the simulator, after which
+inference is not only fast but---as we have verified here---calibrated and, where
+the standard analysis is biased, corrected. This is the methodological payoff of
+trustworthy amortization.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_pref_bias.pdf}
+\caption{Bias of the posterior mean under preferential sampling, against the true
+preferentiality $\gamma$. The design-ignorant analysis (orange) is increasingly
+biased as sampling becomes more informative; the design-aware NPE (blue) stays
+essentially unbiased.}
+\label{fig:prefbias}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\textwidth]{figures/fig_pref_gamma.pdf}
+\caption{\emph{Left:} the design-aware NPE identifies the preferentiality
+parameter $\gamma$ from a single pattern. \emph{Right:} for an example dataset
+its $\gamma$ posterior matches gold-standard NUTS for the joint preferential
+model.}
+\label{fig:prefgamma}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{Inference under preferential sampling ($\NTest$ test datasets). Ignoring
+the informative design biases $\beta_0$ and $\sigma$ and breaks calibration; the
+design-aware NPE is unbiased and calibrated.}
+\input{table_pref.tex}
+\label{tab:pref}
+\end{table}
+
 \section{Related work}
 
 \paragraph{Simulation-based inference.}
@@ -493,17 +595,19 @@ CNN, fit a flow, and---critically---\emph{check} with SBC, coverage and a
 gold-standard comparison before trusting the result.
 
 \paragraph{Limitations and outlook.}
-Our study fixes the grid resolution and the kernel family, infers three global
+Our study fixes the grid resolution and the kernel family, infers global
 parameters, and does not reconstruct the latent field; the misspecification
-analysis shows real sensitivity to smoothness. Natural extensions are to amortize
-over grid resolution and domain shape, to jointly infer the latent intensity
-surface (a spatial prediction task), to add covariates and non-stationarity, and
-to handle realistic observation processes---thinning, preferential sampling and
-aggregation---where the likelihood-free nature of SBI is decisive and analytic
-competitors do not apply. Treating the kernel smoothness as an inferred parameter,
-rather than a fixed modelling choice, is a promising route to robustness. We view
+analysis shows real sensitivity to smoothness. The preferential-sampling result
+(Section~\ref{sec:pref}) is, we believe, the more consequential direction: it
+shows that once amortized inference is \emph{trusted}, the likelihood-free
+interface makes non-standard observation models tractable almost for free. Other
+members of that family---thinning and imperfect detection, aggregation to coarse
+regions (change of support), and adaptive designs---are immediate next steps, as
+are amortizing over grid resolution and domain shape, jointly inferring the
+latent intensity surface, and treating the kernel smoothness as an inferred
+parameter to convert the misspecification sensitivity into robustness. We view
 calibrated amortized inference as a practical path to LGCP modelling at the scale
-that contemporary spatial data demand.
+and with the observational complexity that contemporary spatial data demand.
 
 \paragraph{Reproducibility.}
 The simulator, method, diagnostics and all experiment scripts are released; every

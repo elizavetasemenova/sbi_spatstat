@@ -130,11 +130,18 @@ def train_npe(
     x,                       # tensor of grids [N,G,G] or feats [N,D]
     cfg: TrainConfig,
     device="cpu",
+    transform_fn=None,
 ) -> TrainReport:
-    """Maximum-likelihood training of an NPE model."""
+    """Maximum-likelihood training of an NPE model.
+
+    ``transform_fn`` maps natural parameters to the unconstrained space the flow
+    models; defaults to the 3-parameter LGCP transform.
+    """
+    if transform_fn is None:
+        transform_fn = lgcp.to_unconstrained
     torch.manual_seed(cfg.seed)
     model.to(device)
-    theta_u = lgcp.to_unconstrained(torch.as_tensor(theta, dtype=torch.float32)).to(device)
+    theta_u = transform_fn(torch.as_tensor(theta, dtype=torch.float32)).to(device)
     x = torch.as_tensor(x, dtype=torch.float32).to(device)
 
     tr, va = _split(theta.shape[0], cfg.val_frac, cfg.seed)
