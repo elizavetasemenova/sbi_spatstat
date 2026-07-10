@@ -27,7 +27,7 @@ def main():
     for k in range(K):
         obs, r = X[k, 0], X[k, 1]
         y = np.rint(np.expm1(obs)) * (r > 0.5)         # reconstruct integer counts
-        res = ref.run_nuts_preferential(r, y, sim.coords, sim.area,
+        res = ref.run_nuts_preferential(r, y, sim.core.coords, sim.area,
                                         num_warmup=600, num_samples=500, num_chains=2,
                                         seed=100 + k)
         rhats.append(max(res["rhat"].values()))
