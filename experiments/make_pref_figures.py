@@ -84,14 +84,16 @@ def write_table(res):
     bp = res["bias_ps"]; bn = res["bias_naive"]
     pp = res["sbc_ps"]; pn = res["sbc_naive"]
     with open(os.path.join(FIG, "..", "table_pref.tex"), "w") as f:
-        f.write("% auto-generated\n\\begin{tabular}{l ccc ccc c}\n\\toprule\n")
-        f.write(r" & \multicolumn{3}{c}{bias} & \multicolumn{3}{c}{90\% coverage} & SBC \\" + "\n")
-        f.write(r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}" + "\n")
-        f.write(r"Analysis & $\beta_0$ & $\sigma$ & $\ell$ & $\beta_0$ & $\sigma$ & $\ell$ & $\min p$ \\" + "\n\\midrule\n")
+        f.write("% auto-generated\n\\begin{tabular}{l ccc ccc cc}\n\\toprule\n")
+        f.write(r" & \multicolumn{3}{c}{bias} & \multicolumn{3}{c}{90\% coverage} & "
+                r"\multicolumn{2}{c}{SBC $p$} \\" + "\n")
+        f.write(r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-9}" + "\n")
+        f.write(r"Analysis & $\beta_0$ & $\sigma$ & $\ell$ & $\beta_0$ & $\sigma$ & $\ell$ "
+                r"& $\beta_0$ & $\sigma$ \\" + "\n\\midrule\n")
         f.write(f"Design-ignorant & {bn[0]:+.2f} & {bn[1]:+.2f} & {bn[2]:+.2f} & "
-                f"{cov_nv[0]:.2f} & {cov_nv[1]:.2f} & {cov_nv[2]:.2f} & {min(pn):.3f} \\\\\n")
+                f"{cov_nv[0]:.2f} & {cov_nv[1]:.2f} & {cov_nv[2]:.2f} & {pn[0]:.3f} & {pn[1]:.3f} \\\\\n")
         f.write(f"Design-aware (ours) & {bp[0]:+.2f} & {bp[1]:+.2f} & {bp[2]:+.2f} & "
-                f"{cov_ps[0]:.2f} & {cov_ps[1]:.2f} & {cov_ps[2]:.2f} & {min(pp):.3f} \\\\\n")
+                f"{cov_ps[0]:.2f} & {cov_ps[1]:.2f} & {cov_ps[2]:.2f} & {pp[0]:.2f} & {pp[1]:.3f} \\\\\n")
         f.write("\\bottomrule\n\\end{tabular}\n")
     print("wrote table_pref.tex")
 
@@ -107,8 +109,9 @@ def write_macros(res, mc):
         f.write(f"\\newcommand{{\\PrefBiasPsSig}}{{{bp[1]:+.2f}}}\n")
         f.write(f"\\newcommand{{\\PrefCovNaiveMin}}{{{cov_nv.min():.2f}}}\n")
         f.write(f"\\newcommand{{\\PrefCovPsMin}}{{{cov_ps.min():.2f}}}\n")
-        f.write(f"\\newcommand{{\\PrefSbcNaive}}{{{min(res['sbc_naive']):.3f}}}\n")
-        f.write(f"\\newcommand{{\\PrefSbcPs}}{{{min(res['sbc_ps']):.2f}}}\n")
+        f.write(f"\\newcommand{{\\PrefSbcNaive}}{{{max(res['sbc_naive'][0], res['sbc_naive'][1]):.3f}}}\n")
+        f.write(f"\\newcommand{{\\PrefSbcPsBeta}}{{{res['sbc_ps'][0]:.2f}}}\n")
+        f.write(f"\\newcommand{{\\PrefSbcPsSig}}{{{res['sbc_ps'][1]:.2f}}}\n")
         f.write(f"\\newcommand{{\\GammaRtwo}}{{{res['gamma_r2']:.2f}}}\n")
         if mc is not None and mc.get("c2st_mean") is not None:
             f.write(f"\\newcommand{{\\PrefCtst}}{{{mc['c2st_mean']:.3f}}}\n")

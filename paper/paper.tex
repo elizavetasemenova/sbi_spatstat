@@ -483,19 +483,23 @@ derivation is needed for either; only the simulator changes.
 \paragraph{Results.}
 Figure~\ref{fig:prefbias} and Table~\ref{tab:pref} tell the story on
 $\NTest$ preferentially sampled test datasets. The design-ignorant analysis is
-biased, and increasingly so as preferentiality grows: at the strongest
-$\gamma$ it overestimates the baseline intensity and the spatial variance
-(overall bias $\PrefBiasNaiveBeta$ in $\beta_0$ and $\PrefBiasNaiveSig$ in
-$\sigma$), and its credible intervals are miscalibrated (minimum $90\%$ coverage
-$\PrefCovNaiveMin$, SBC $p=\PrefSbcNaive$). The design-aware NPE is essentially
+biased, and increasingly so as preferentiality grows: it overestimates the
+baseline intensity (bias $\PrefBiasNaiveBeta$ in $\beta_0$) and underestimates
+the spatial variance (bias $\PrefBiasNaiveSig$ in $\sigma$, because it sees only
+the high-intensity part of the field), with both biases rising monotonically in
+$\gamma$ and its $90\%$ intervals under-covering (down to $\PrefCovNaiveMin$;
+SBC $p<0.001$ on $\beta_0$ and $\sigma$). The design-aware NPE is essentially
 unbiased across the whole range of $\gamma$ (bias $\PrefBiasPsBeta$ and
-$\PrefBiasPsSig$), restores calibration (minimum coverage $\PrefCovPsMin$, SBC
-$p=\PrefSbcPs$), and---as a bonus the ignorable analysis cannot provide---infers
-the preferentiality itself ($\gamma$ recovered with $R^2=\GammaRtwo$;
-Figure~\ref{fig:prefgamma}). A gold-standard NUTS sampler for the joint
-preferential model confirms the design-aware posterior is correct, not merely
-self-consistent: the two are indistinguishable (C2ST $\PrefCtst$ over
-$\PrefNCompared$ datasets).
+$\PrefBiasPsSig$) and restores coverage to nominal ($\PrefCovPsMin$ at worst),
+with SBC satisfied on exactly the parameters the design corrupts
+($p=\PrefSbcPsBeta$ and $\PrefSbcPsSig$ for $\beta_0,\sigma$; the harder-to-identify
+range $\ell$ shows a mild residual SBC deviation despite its nominal coverage).
+As a bonus the
+ignorable analysis cannot provide, it also infers the preferentiality itself
+($\gamma$ recovered with $R^2=\GammaRtwo$; Figure~\ref{fig:prefgamma}). A
+gold-standard NUTS sampler for the joint preferential model confirms the
+design-aware posterior is correct, not merely self-consistent: the two are
+indistinguishable (C2ST $\PrefCtst$ over $\PrefNCompared$ datasets).
 
 \paragraph{Why this matters.}
 Preferential sampling is one instance of a general pattern. Thinning,
@@ -512,8 +516,10 @@ trustworthy amortization.
 \includegraphics[width=\textwidth]{figures/fig_pref_bias.pdf}
 \caption{Bias of the posterior mean under preferential sampling, against the true
 preferentiality $\gamma$. The design-ignorant analysis (orange) is increasingly
-biased as sampling becomes more informative; the design-aware NPE (blue) stays
-essentially unbiased.}
+biased in $\beta_0$ and $\sigma$ as sampling becomes more informative; the
+design-aware NPE (blue) stays essentially unbiased. Preferential sampling chiefly
+distorts level and variance---note the much finer vertical scale for the range
+$\ell$, where both methods are effectively unbiased.}
 \label{fig:prefbias}
 \end{figure}
 
