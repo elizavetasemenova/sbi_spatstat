@@ -498,8 +498,15 @@ As a bonus the
 ignorable analysis cannot provide, it also infers the preferentiality itself
 ($\gamma$ recovered with $R^2=\GammaRtwo$; Figure~\ref{fig:prefgamma}). A
 gold-standard NUTS sampler for the joint preferential model confirms the
-design-aware posterior is correct, not merely self-consistent: the two are
-indistinguishable (C2ST $\PrefCtst$ over $\PrefNCompared$ datasets).
+design-aware posterior closely tracks the true one, not merely a self-consistent
+approximation: over $\PrefNCompared$ datasets the marginals agree to within
+$\PrefWass$ prior standard deviations (mean $1$-Wasserstein), and a classifier
+separates the two posteriors only modestly above chance (C2ST $\PrefCtst$ versus
+$0.5$ for identical posteriors). The small residual---larger here than for the
+fully observed model (Section~\ref{sec:mcmc})---is consistent with the mild SBC
+deviations on the harder parameters, and is the price of the more challenging
+four-parameter, partially observed inference; the first-order conclusions
+(bias removal and restored coverage) are unaffected.
 
 \paragraph{Why this matters.}
 Preferential sampling is one instance of a general pattern. Thinning,

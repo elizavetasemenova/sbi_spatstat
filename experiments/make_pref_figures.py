@@ -114,8 +114,13 @@ def write_macros(res, mc):
         f.write(f"\\newcommand{{\\PrefSbcPsSig}}{{{res['sbc_ps'][1]:.2f}}}\n")
         f.write(f"\\newcommand{{\\GammaRtwo}}{{{res['gamma_r2']:.2f}}}\n")
         if mc is not None and mc.get("c2st_mean") is not None:
-            f.write(f"\\newcommand{{\\PrefCtst}}{{{mc['c2st_mean']:.3f}}}\n")
+            f.write(f"\\newcommand{{\\PrefCtst}}{{{mc['c2st_mean']:.2f}}}\n")
             f.write(f"\\newcommand{{\\PrefNCompared}}{{{mc['n_compared']}}}\n")
+            # normalise per-parameter 1-Wasserstein by prior sd (beta0,sigma,ell,gamma)
+            prior_sd = np.array([0.7, (1.8 - 0.2) / np.sqrt(12), (0.5 - 0.05) / np.sqrt(12),
+                                 3.0 / np.sqrt(12)])
+            wn = np.array(mc["wasserstein_mean"]) / prior_sd
+            f.write(f"\\newcommand{{\\PrefWass}}{{{wn.mean():.2f}}}\n")
     print("wrote preferential macros")
 
 
