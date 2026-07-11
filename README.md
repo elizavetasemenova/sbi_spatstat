@@ -24,6 +24,14 @@ The paper (`paper/paper.pdf`) is generated end-to-end from these experiments.
   cost is repaid after a handful of datasets.
 - **Honest.** A kernel-misspecification study shows graceful, diagnosable
   degradation rather than silent failure.
+- **Extensible (the methodological contribution).** Because the approach is
+  likelihood-free, a non-standard observation process is just a change to the
+  simulator. Under **preferential sampling** — where observation locations are
+  informative and the standard ignorable-design analysis is biased (β₀ bias
+  +0.23, σ −0.11) — a design-aware NPE is unbiased, restores calibration,
+  recovers the preferentiality strength γ (R²=0.68), and matches a joint-model
+  NUTS reference. This is a capability likelihood-based tools (INLA) get only
+  through bespoke, per-model derivations.
 
 ## Repository layout
 
@@ -33,7 +41,8 @@ sbilgcp/                 core library
                          hand-crafted spatial summaries
   flows.py               conditional Masked Autoregressive Flow (from scratch)
   npe.py                 CNN/MLP embeddings, NPE model + trainer, regressor baseline
-  reference_mcmc.py      gold-standard NUTS (NumPyro), non-centred latent field
+  reference_mcmc.py      gold-standard NUTS (NumPyro): standard + preferential
+  preferential.py        preferential-sampling simulator + design-aware NPE
   diagnostics.py         SBC, coverage, recovery, C2ST, Wasserstein
 experiments/
   config.py              all sizes / seeds / paths
@@ -42,7 +51,10 @@ experiments/
   eval_calibration.py    SBC / coverage / recovery / misspecification
   run_mcmc.py            gold-standard NUTS on a subset of test datasets
   eval_mcmc.py           NPE-vs-NUTS comparison (C2ST, Wasserstein, timing)
+  exp_preferential.py    preferential-sampling experiment (design-aware vs naive)
+  run_pref_mcmc.py       joint-model NUTS validation of the design-aware NPE
   make_figures.py        all publication figures + LaTeX tables
+  make_pref_figures.py   preferential-section figures + table
   gen_macros.py          inline numeric macros for the paper
   run_pipeline.sh        orchestrates every stage end-to-end
 paper/                   LaTeX source, figures, compiled PDF
