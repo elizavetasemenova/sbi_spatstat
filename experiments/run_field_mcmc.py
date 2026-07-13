@@ -24,7 +24,7 @@ def main():
     pm_corr, ps_corr, rmse_ref, rmse_npe, cov_agree = [], [], [], [], []
     examples = {}
     for k in range(K):
-        r = ref.run_nuts_field(y[k], sim.core.coords, area, num_warmup=500,
+        r = ref.run_nuts_field(y[k], sim.coords, area, num_warmup=500,
                                num_samples=500, num_chains=2, seed=300 + k)
         if r["rhat"] > 1.1:
             print(f"  [{k}] skip Rhat {r['rhat']:.3f}"); continue
