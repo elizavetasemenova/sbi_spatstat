@@ -22,6 +22,12 @@ The paper (`paper/paper.pdf`) is generated end-to-end from these experiments.
   (classifier two-sample accuracy ≈ 0.5) dataset by dataset.
 - **Fast.** Milliseconds per dataset vs. seconds–minutes for MCMC; the training
   cost is repaid after a handful of datasets.
+- **The whole map, not just parameters.** A U-Net emits a structured
+  (low-rank + diagonal) Gaussian posterior over the entire log-intensity surface
+  in one forward pass — calibrated pointwise (90% coverage 0.90, pixel z-score
+  SD 1.01) **and** for aggregate functionals (total-abundance coverage 0.93 vs
+  0.56 for a per-pixel posterior), matching a gold-standard NUTS field posterior
+  (mean-map correlation 0.99).
 - **Honest.** A kernel-misspecification study shows graceful, diagnosable
   degradation rather than silent failure.
 - **Extensible (the methodological contribution).** Because the approach is
@@ -43,6 +49,7 @@ sbilgcp/                 core library
   npe.py                 CNN/MLP embeddings, NPE model + trainer, regressor baseline
   reference_mcmc.py      gold-standard NUTS (NumPyro): standard + preferential
   preferential.py        preferential-sampling simulator + design-aware NPE
+  field.py               U-Net + low-rank Gaussian posterior over the surface
   diagnostics.py         SBC, coverage, recovery, C2ST, Wasserstein
 experiments/
   config.py              all sizes / seeds / paths
