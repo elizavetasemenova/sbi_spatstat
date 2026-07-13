@@ -60,7 +60,12 @@ gold-standard No-U-Turn Sampler, the amortized posteriors are statistically
 indistinguishable---a classifier two-sample test accuracy of \CtstMean{} (chance
 $=0.5$)---yet are produced in \NpeMs{}~ms per dataset versus \McmcSec{}~s for
 MCMC, a per-dataset speed-up of $\sim\!\Speedup\times$ that repays its one-time
-training cost after only \BreakEven{} datasets. Finally, we exploit the
+training cost after only \BreakEven{} datasets. Going beyond global parameters,
+we also amortize the \emph{intensity surface} itself: a single network returns a
+structured-Gaussian posterior over the whole latent field whose low-rank
+correlation term keeps not only pointwise intervals but \emph{aggregate}
+functionals (total abundance, regional counts) calibrated---matching a
+gold-standard field posterior at a fraction of the cost. Finally, we exploit the
 likelihood-free nature of the approach to go beyond the standard model:
 under \emph{preferential sampling}, where observation locations are informative
 and the usual analysis is biased, adding the design to the simulator yields a
@@ -141,6 +146,11 @@ spatial summary statistics.
 the amortized posteriors are statistically indistinguishable from MCMC (classifier
 two-sample accuracy \CtstMean{}) at a $\sim\!\Speedup\times$ lower per-dataset
 cost, breaking even after \BreakEven{} datasets (Section~\ref{sec:mcmc}).
+\item We amortize the \textbf{intensity surface}, not just the parameters: a
+U-Net emits a structured (low-rank + diagonal) Gaussian posterior over the whole
+latent field in one forward pass. It is calibrated pointwise \emph{and} for
+aggregate functionals---where a per-cell posterior fails---and matches a
+gold-standard NUTS field posterior (Section~\ref{sec:field}).
 \item We report an honest robustness study under kernel misspecification, showing
 graceful rather than catastrophic degradation (Section~\ref{sec:misspec}).
 \item \textbf{A methodological extension} that goes beyond prior amortized LGCP
@@ -419,6 +429,88 @@ C2ST is computed on the joint $3$-D posteriors (0.5 = indistinguishable).}
 \label{tab:mcmc}
 \end{table}
 
+\section{From parameters to the intensity surface}
+\label{sec:field}
+
+So far, as in prior amortized-LGCP work \citep{wang2025inference}, the target has
+been the global parameters. But in most applications---disease mapping, species
+distribution, hotspot detection---the quantity of scientific interest is the
+\emph{surface} itself: the latent log-intensity field $Z(s)=\beta_0+f(s)$, or the
+intensity $\Lambda(s)=e^{Z(s)}$, at every location, with uncertainty. We show that
+this map, too, can be produced by a single amortized forward pass.
+
+\paragraph{An amortized field posterior.}
+We train a U-Net that maps the count grid to a \emph{structured Gaussian}
+posterior over the whole field,
+\begin{equation}
+Z\mid y \;\sim\; \N\!\big(\mu(y),\; \mathrm{diag}(d(y)^2)+V(y)V(y)^\top\big),
+\label{eq:fieldpost}
+\end{equation}
+where $\mu\in\R^{G^2}$ is the posterior mean map, $d$ the per-cell scale, and
+$V\in\R^{G^2\times k}$ a rank-$k$ factor ($k=16$). The network is trained by
+maximizing the density~\eqref{eq:fieldpost} of the true field under the same
+simulator, using the Woodbury identity so the $G^2\times G^2$ covariance is never
+formed. The mean is parameterized as a data-anchored residual around the pointwise
+estimate $\log((y_i+\tfrac12)/a)$, so the surface has the correct absolute scale
+and the network learns only the spatial correction and the uncertainty. Training
+takes \FieldTrainMin{}~min; thereafter each map---mean and full joint
+uncertainty---is one forward pass.
+
+\paragraph{Why the low-rank term matters.}
+The field posterior is spatially \emph{correlated}: neighbouring cells are
+uncertain together. A purely per-cell (diagonal) posterior can be calibrated
+pointwise yet badly misjudge \emph{aggregate} functionals---a regional case count
+or the total abundance $N=\int\Lambda$---whose error variance is dominated by
+those correlations. The low-rank factor $V$ captures them, at negligible cost, and
+is what makes the aggregates calibrated.
+
+\paragraph{Results.}
+Figure~\ref{fig:fieldmaps} shows reconstructions: the posterior mean recovers the
+true surface (test-set correlation $\FieldCorr$, RMSE $\FieldRMSE$ on the log
+scale) and the posterior SD map correctly localizes uncertainty to the
+low-count regions where the field is genuinely unconstrained.
+Figure~\ref{fig:fieldcalib} quantifies calibration. Pointwise intervals are
+near-nominal ($90\%$ coverage $\FieldPointCov$) and the pixelwise $z$-scores are
+standard normal (SD $\FieldZstd$). For total abundance, the full posterior is
+calibrated ($90\%$ coverage $\FieldAbFull$) while the diagonal-only ablation
+collapses to $\FieldAbDiag$---concrete evidence that the low-rank correlation is
+necessary, not decorative; the same holds for regional counts ($\FieldRegFull$
+vs.\ $\FieldRegDiag$). Finally, against a gold-standard NUTS field posterior
+(Figure~\ref{fig:fieldmcmc}), the amortized posterior agrees closely: over
+$\FieldMcmcN$ datasets the posterior-mean maps correlate at $\FieldMcmcMeanCorr$
+and the posterior-SD maps at $\FieldMcmcSdCorr$, with matching pointwise coverage
+($\FieldMcmcCovNpe$ vs.\ $\FieldMcmcCovRef$). Amortized inference thus delivers
+not only calibrated parameters but a calibrated \emph{map}---the object
+practitioners actually act on.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_field_maps.pdf}
+\caption{Amortized intensity-surface reconstruction for three held-out patterns.
+From the counts (left) a single forward pass returns the posterior mean
+log-intensity (matching the truth) and a posterior-SD map that concentrates
+uncertainty in the sparsely observed regions.}
+\label{fig:fieldmaps}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_field_calib.pdf}
+\caption{Field-posterior calibration. \emph{Left:} near-nominal pointwise
+coverage. \emph{Middle:} total-abundance coverage---the full low-rank posterior
+is calibrated, the diagonal-only ablation is badly overconfident. \emph{Right:}
+pixelwise $z$-scores match $\N(0,1)$.}
+\label{fig:fieldcalib}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_field_mcmc.pdf}
+\caption{The amortized field posterior (mean and SD maps) against gold-standard
+NUTS for an example pattern; the two are visually and quantitatively close.}
+\label{fig:fieldmcmc}
+\end{figure}
+
 \section{Robustness to misspecification}
 \label{sec:misspec}
 
@@ -608,19 +700,24 @@ CNN, fit a flow, and---critically---\emph{check} with SBC, coverage and a
 gold-standard comparison before trusting the result.
 
 \paragraph{Limitations and outlook.}
-Our study fixes the grid resolution and the kernel family, infers global
-parameters, and does not reconstruct the latent field; the misspecification
-analysis shows real sensitivity to smoothness. The preferential-sampling result
-(Section~\ref{sec:pref}) is, we believe, the more consequential direction: it
-shows that once amortized inference is \emph{trusted}, the likelihood-free
-interface makes non-standard observation models tractable almost for free. Other
-members of that family---thinning and imperfect detection, aggregation to coarse
-regions (change of support), and adaptive designs---are immediate next steps, as
-are amortizing over grid resolution and domain shape, jointly inferring the
-latent intensity surface, and treating the kernel smoothness as an inferred
-parameter to convert the misspecification sensitivity into robustness. We view
-calibrated amortized inference as a practical path to LGCP modelling at the scale
-and with the observational complexity that contemporary spatial data demand.
+Our study fixes the grid resolution and the kernel family; the misspecification
+analysis shows real sensitivity to smoothness, and the field posterior, though
+calibrated, uses a low-rank Gaussian form that may understate strongly
+non-Gaussian tails. Two directions we have begun here seem the most consequential.
+The intensity-surface posterior (Section~\ref{sec:field}) turns amortized
+inference into amortized \emph{mapping}, the object practitioners act on; richer
+posterior families (conditional flows or diffusions over the field) and joint
+inference with the hyperparameters are natural refinements. The
+preferential-sampling result (Section~\ref{sec:pref}) shows that once amortized
+inference is \emph{trusted}, the likelihood-free interface makes non-standard
+observation models tractable almost for free---thinning and imperfect detection,
+aggregation to coarse regions (change of support), and adaptive designs are
+immediate next steps. Amortizing over grid resolution and domain shape, and
+treating the kernel smoothness as an inferred parameter to convert the
+misspecification sensitivity into robustness, round out the agenda. We view
+calibrated amortized inference---of parameters, surfaces, and observation
+processes alike---as a practical path to LGCP modelling at the scale and
+observational complexity that contemporary spatial data demand.
 
 \paragraph{Reproducibility.}
 The simulator, method, diagnostics and all experiment scripts are released; every
