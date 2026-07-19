@@ -36,12 +36,19 @@ def main():
     print(f"simulating {N_TRAIN} aggregated ({COARSE}x{COARSE}-region) datasets ...")
     rng = np.random.default_rng(SEED)
     theta_tr, r_tr = sim.simulate_dataset(N_TRAIN, rng)
-    print("training aggregation NPE ...")
     model = A.AggNPE(C=COARSE, n_transforms=5, hidden=64)
-    rep = train_npe(model, theta_tr, r_tr, TrainConfig(epochs=80, batch_size=256, patience=15,
-                                                       log_every=5), transform_fn=lgcp.to_unconstrained)
-    torch.save(model.state_dict(), F_MODEL)
-    print(f"  best val {rep.best_val:.3f} ({rep.wall/60:.1f} min)")
+    import os
+    if os.path.exists(F_MODEL):
+        model.load_state_dict(torch.load(F_MODEL))
+        train_min = float("nan")
+        print("loaded existing aggregation NPE")
+    else:
+        print("training aggregation NPE ...")
+        rep = train_npe(model, theta_tr, r_tr, TrainConfig(epochs=80, batch_size=256, patience=15,
+                                                           log_every=5), transform_fn=lgcp.to_unconstrained)
+        torch.save(model.state_dict(), F_MODEL)
+        train_min = rep.wall_time / 60
+        print(f"  best val {rep.best_val:.3f} ({train_min:.1f} min)")
 
     rng = np.random.default_rng(SEED + 1)
     theta_te, r_te = sim.simulate_dataset(N_TEST, rng)
@@ -69,7 +76,7 @@ def main():
         "post_width_full": width_full.tolist(),
         "width_ratio": (width_agg / width_full).tolist(),
         "r2_full": full["r2"],
-        "val_nll": rep.best_val, "train_min": rep.wall / 60,
+        "train_min": train_min,
     }
     with open(F_RES, "w") as f:
         json.dump(res, f, indent=2)
