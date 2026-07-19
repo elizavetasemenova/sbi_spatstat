@@ -132,6 +132,45 @@ def run_nuts_field(y_grid, coords, area, nu=0.5, num_warmup=500, num_samples=500
 jitter_default = 1e-5
 
 
+def run_nuts_aggregated(r_region, coords, area, G, C, nu=0.5, num_warmup=600,
+                        num_samples=500, num_chains=2, seed=0):
+    """NUTS for the change-of-support model: observe C x C region totals ``r``,
+    infer parameters (and implicitly the fine field). Gold-standard reference."""
+    r = jnp.asarray(np.asarray(r_region).reshape(-1).astype(np.float32))
+    dist_m = _dist_matrix(jnp.asarray(coords))
+    n = coords.shape[0]
+    eye = jnp.eye(n)
+    b = G // C
+    # index map: fine cell -> region id
+    fine_ij = np.stack(np.meshgrid(np.arange(G), np.arange(G), indexing="ij"), -1).reshape(-1, 2)
+    region = (fine_ij[:, 0] // b) * C + (fine_ij[:, 1] // b)
+    region_j = jnp.asarray(region)
+
+    def model(r):
+        beta0 = numpyro.sample("beta0", dist.Normal(lgcp.BETA0_MEAN, lgcp.BETA0_SD))
+        sigma = numpyro.sample("sigma", dist.Uniform(lgcp.SIGMA_LOW, lgcp.SIGMA_HIGH))
+        ell = numpyro.sample("ell", dist.Uniform(lgcp.ELL_LOW, lgcp.ELL_HIGH))
+        corr = _matern_corr(dist_m, ell, nu)
+        L = jnp.linalg.cholesky(sigma ** 2 * corr + jitter_default * eye)
+        eta = numpyro.sample("eta", dist.Normal(0.0, 1.0).expand([n]))
+        Z = beta0 + L @ eta
+        fine_rate = area * jnp.exp(Z)
+        region_rate = jax.ops.segment_sum(fine_rate, region_j, num_segments=C * C)
+        numpyro.sample("r", dist.Poisson(region_rate), obs=r)
+
+    kernel = NUTS(model, target_accept_prob=0.9, max_tree_depth=8)
+    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples,
+                num_chains=num_chains, chain_method="sequential", progress_bar=False)
+    t0 = time.time()
+    mcmc.run(jax.random.PRNGKey(seed), r=r)
+    wall = time.time() - t0
+    s = mcmc.get_samples()
+    theta = np.stack([np.asarray(s[k]) for k in ("beta0", "sigma", "ell")], axis=1)
+    grouped = mcmc.get_samples(group_by_chain=True)
+    rhat = {k: float(_split_rhat(np.asarray(grouped[k]))) for k in ("beta0", "sigma", "ell")}
+    return {"theta": theta, "wall": wall, "rhat": rhat}
+
+
 def make_preferential_model(coords, area, nu=0.5, jitter=1e-5):
     """Joint model of the observation mask r and counts y under preferential
     sampling: r_i ~ Bernoulli(sigmoid(gamma f_i)), y_i ~ Poisson(area e^{Z_i})

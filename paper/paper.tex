@@ -67,11 +67,13 @@ correlation term keeps not only pointwise intervals but \emph{aggregate}
 functionals (total abundance, regional counts) calibrated---matching a
 gold-standard field posterior at a fraction of the cost. Finally, we exploit the
 likelihood-free nature of the approach to go beyond the standard model:
-under \emph{preferential sampling}, where observation locations are informative
-and the usual analysis is biased, adding the design to the simulator yields a
-design-aware estimator that is unbiased and calibrated and additionally recovers
-the strength of the preferentiality---at no extra methodological cost. Amortized
-SBI thus makes calibrated LGCP inference not only fast but extensible to
+under two non-standard observation processes---\emph{preferential sampling}
+(informative locations, where the usual analysis is biased) and \emph{spatial
+aggregation} (only coarse regional totals observed, the change-of-support
+problem)---adding the process to the simulator yields calibrated, bias-corrected
+inference that a design-aware estimator delivers at no extra methodological cost,
+and that correctly widens its uncertainty as aggregation destroys information.
+Amortized SBI thus makes calibrated LGCP inference not only fast but extensible to
 observation processes that defeat likelihood-based tools.
 \end{abstract}
 
@@ -158,7 +160,10 @@ work: inference under \emph{preferential sampling}. Because the informative
 design is just part of the simulator, a design-aware NPE corrects the bias that
 the standard ignorable-design analysis suffers, stays calibrated, and recovers
 the preferentiality parameter---validated against a joint-model NUTS reference
-(Section~\ref{sec:pref}).
+(Section~\ref{sec:pref}). A second observation model, \emph{spatial aggregation}
+(change of support), is handled the same way: inference from coarse regional
+totals stays calibrated and widens its uncertainty to match the information lost
+(Section~\ref{sec:agg}).
 \end{enumerate}
 All code and experiments are released to reproduce every number and figure.
 
@@ -641,6 +646,61 @@ design-aware NPE is unbiased and calibrated.}
 \label{tab:pref}
 \end{table}
 
+\section{Change of support: inference from aggregated counts}
+\label{sec:agg}
+
+Preferential sampling is one non-standard observation model; spatial
+\emph{aggregation} is another, and arguably the more pervasive one. In spatial
+epidemiology and the social sciences the point pattern is almost never observed
+directly---counts are released as totals over coarse administrative regions.
+Recovering fine-scale structure from such totals is the change-of-support (or
+spatial-misalignment) problem \citep{gotway2002combining}. Its likelihood is
+awkward for analytic tools because each region's contribution is a sum of
+correlated log-Gaussian Poisson rates; for amortized SBI it is, once more, just a
+change to the simulator---aggregate the simulated fine counts to the observation
+support and learn the posterior from the coarse totals
+(Figure~\ref{fig:aggill}).
+
+\paragraph{Setup and results.}
+We observe totals over a $4\times4$ partition of the $\Grid\times\Grid$ grid---a
+sixteen-fold aggregation---and infer $(\beta_0,\sigma,\ell)$ from the sixteen
+regional counts with a convolutional NPE trained on the aggregated simulator.
+Two things stand out (Figure~\ref{fig:aggresults}). First, the posterior remains
+\emph{calibrated} despite the loss of information: SBC holds ($\min p=\AggSbcMin$)
+and $90\%$ coverage is near-nominal ($\AggCovB/\AggCovS/\AggCovL$). Second, the
+method is \emph{honest about what aggregation destroys}. Baseline intensity is
+still well recovered ($R^2$ falls only from $\AggRtwoBfull$ to $\AggRtwoB$), but
+the correlation range is largely washed out---its $R^2$ drops from $\AggRtwoLfull$
+to $\AggRtwoL$ because within-region spatial variation is exactly what
+aggregation removes---and the posteriors widen accordingly
+($\AggWidthL\times$ wider for $\ell$ versus the fully observed case, against only
+$\AggWidthB\times$ for $\beta_0$). The uncertainty grows to match the information
+lost, rather than staying falsely confident. A gold-standard NUTS sampler for the
+aggregated model confirms the amortized posterior is correct (C2ST $\AggCtst$ over
+$\AggN$ datasets), at $\AggMcmcSec$~s per NUTS fit versus milliseconds for the
+amortized estimator.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.62\textwidth]{figures/fig_agg_illustration.pdf}
+\caption{Change of support. The fine point pattern (left) is latent; only coarse
+regional totals (right) are observed. Inference must recover fine-scale
+parameters from the aggregated counts.}
+\label{fig:aggill}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_agg_results.pdf}
+\caption{Inference from aggregated counts. \emph{Left:} coverage stays near
+nominal. \emph{Middle:} posteriors widen relative to the fully observed case,
+most for the range $\ell$. \emph{Right:} recovery ($R^2$) is preserved for
+$\beta_0$ but collapses for $\ell$---aggregation removes the within-region
+variation that identifies it. Calibrated inference tracks the true information
+content.}
+\label{fig:aggresults}
+\end{figure}
+
 \section{Related work}
 
 \paragraph{Simulation-based inference.}
@@ -708,11 +768,14 @@ The intensity-surface posterior (Section~\ref{sec:field}) turns amortized
 inference into amortized \emph{mapping}, the object practitioners act on; richer
 posterior families (conditional flows or diffusions over the field) and joint
 inference with the hyperparameters are natural refinements. The
-preferential-sampling result (Section~\ref{sec:pref}) shows that once amortized
-inference is \emph{trusted}, the likelihood-free interface makes non-standard
-observation models tractable almost for free---thinning and imperfect detection,
-aggregation to coarse regions (change of support), and adaptive designs are
-immediate next steps. Amortizing over grid resolution and domain shape, and
+preferential-sampling and change-of-support results
+(Sections~\ref{sec:pref}--\ref{sec:agg}) show that once amortized inference is
+\emph{trusted}, the likelihood-free interface makes non-standard observation
+models tractable almost for free; thinning and imperfect detection, and adaptive
+designs are immediate further members of that family. The most important gap is
+external validity---all our experiments are simulated; a real application, where
+the generative model is itself uncertain, is the essential next step. Amortizing
+over grid resolution and domain shape, and
 treating the kernel smoothness as an inferred parameter to convert the
 misspecification sensitivity into robustness, round out the agenda. We view
 calibrated amortized inference---of parameters, surfaces, and observation
