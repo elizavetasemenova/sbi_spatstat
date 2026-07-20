@@ -701,6 +701,43 @@ content.}
 \label{fig:aggresults}
 \end{figure}
 
+\section{A real-data case study}
+\label{sec:real}
+
+Everything so far is simulated, which is what makes calibration and gold-standard
+comparison possible. We close with a real point pattern to show the pipeline
+transfers. We use the \texttt{crimes} pattern from the geodanet example dataset distributed
+with the PySAL library \citep{rey2007pysal}: $\RealN$ recorded crime locations in
+a road-network neighbourhood, binned to the same $\Grid\times\Grid$ grid. Crucially we
+\emph{do not retrain}: the very same NPE and field U-Net used throughout, trained
+only on synthetic LGCPs, are applied to the real grid in a single forward pass
+each---the amortization dividend in its purest form.
+
+Figure~\ref{fig:real} shows the result. The amortized estimator returns a
+parameter posterior and a full posterior intensity \emph{map} with uncertainty,
+and both agree with a gold-standard NUTS analysis of the same data: the parameter
+posteriors overlap (C2ST $\RealC2st$; posterior means
+$\beta_0\!=\!\RealBetaN$ vs.\ $\RealBetaM$, $\sigma\!=\!\RealSigN$ vs.\
+$\RealSigM$, $\ell\!=\!\RealEllN$ vs.\ $\RealEllM$ for NPE vs.\ NUTS), and the
+posterior-mean intensity maps correlate at $\RealFieldCorr$ (SD maps at
+$\RealFieldSdCorr$). The amortized analysis takes $\RealNpeMs$~ms; NUTS takes
+$\RealNutsSec$~s. This is a validation of the amortized machinery, not a claim
+that a stationary LGCP is the true generative model for network-constrained
+crime---indeed the mild model mismatch is exactly the regime
+Section~\ref{sec:misspec} anticipates---but it demonstrates that a model trained
+entirely in simulation delivers calibrated, MCMC-quality inference on real data
+instantly.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_realdata.pdf}
+\caption{Real crime point pattern. \emph{Top:} the observed events, and the
+amortized posterior mean and SD of the log-intensity surface (one forward pass
+each, from a network trained only on simulations). \emph{Bottom:} the amortized
+parameter posteriors (blue) against gold-standard NUTS (grey) on the same data.}
+\label{fig:real}
+\end{figure}
+
 \section{Related work}
 
 \paragraph{Simulation-based inference.}
