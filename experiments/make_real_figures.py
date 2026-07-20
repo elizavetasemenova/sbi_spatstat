@@ -72,7 +72,7 @@ def main():
     with open(C.ROOT + "/paper/numbers.tex", "a") as f:
         def c(n, v): f.write(f"\\newcommand{{\\{n}}}{{{v}}}\n")
         c("RealN", res["n_points"])
-        c("RealC2st", f"{res['param_c2st']:.2f}")
+        c("RealCtst", f"{res['param_c2st']:.2f}")
         c("RealFieldCorr", f"{res['field_mean_corr']:.3f}")
         c("RealFieldSdCorr", f"{res['field_sd_corr']:.2f}")
         c("RealNpeMs", f"{res['t_npe_param_ms']+res['t_npe_field_ms']:.0f}")
