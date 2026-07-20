@@ -28,6 +28,15 @@ The paper (`paper/paper.pdf`) is generated end-to-end from these experiments.
   SD 1.01) **and** for aggregate functionals (total-abundance coverage 0.93 vs
   0.56 for a per-pixel posterior), matching a gold-standard NUTS field posterior
   (mean-map correlation 0.99).
+- **Extensible to hard observation models.** Because inference is likelihood-free,
+  non-standard observation processes are just a change to the simulator:
+  **preferential sampling** (design-aware NPE corrects the bias the standard
+  analysis suffers) and **change of support / aggregation** (calibrated inference
+  from coarse regional totals, with uncertainty that grows to match information
+  lost).
+- **Works on real data.** The estimators, trained only on simulations, reproduce
+  a NUTS analysis of a real 287-point crime pattern (parameters and intensity map,
+  map correlation 0.99) with no retraining, in ~2 s vs ~14 min.
 - **Honest.** A kernel-misspecification study shows graceful, diagnosable
   degradation rather than silent failure.
 - **Extensible (the methodological contribution).** Because the approach is

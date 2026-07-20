@@ -73,8 +73,11 @@ aggregation} (only coarse regional totals observed, the change-of-support
 problem)---adding the process to the simulator yields calibrated, bias-corrected
 inference that a design-aware estimator delivers at no extra methodological cost,
 and that correctly widens its uncertainty as aggregation destroys information.
-Amortized SBI thus makes calibrated LGCP inference not only fast but extensible to
-observation processes that defeat likelihood-based tools.
+On a real crime point pattern the estimators---trained only on simulations---
+reproduce a NUTS analysis (parameters and intensity map) with no retraining, in
+seconds rather than minutes. Amortized SBI thus makes calibrated LGCP inference
+not only fast but extensible to observation processes that defeat likelihood-based
+tools.
 \end{abstract}
 
 \section{Introduction}
@@ -125,14 +128,18 @@ Concretely---do they pass the field's strongest calibration diagnostics across
 the whole prior, not just agree with MCMC on a handful of cases; how do they
 compare with the prevailing point-estimate paradigm; what does the choice of
 summary statistics cost in calibration; and how do they behave when the
-simulator is misspecified? This paper is a systematic answer to those questions.
+simulator is misspecified? And, once trust is established, we ask what
+amortization makes newly \emph{possible}: reconstructing the entire intensity
+surface, and calibrated inference under observation processes---preferential
+sampling and change of support---that standard likelihoods handle poorly, before
+closing on a real point pattern. This paper is a systematic answer.
 
 \paragraph{Contributions.}
 Building on the feasibility established by prior amortized LGCP work
-\citep{wang2025inference}, our contribution is a rigorous validation and a set of
-controlled comparisons, using a transparent, dependency-light neural posterior
-estimator (a convolutional summary network feeding a masked autoregressive flow
-over the three interpretable parameters; Section~\ref{sec:method}):
+\citep{wang2025inference}, we contribute both a rigorous \emph{trust audit} and
+several \emph{new capabilities}, using a transparent, dependency-light neural
+posterior estimator (a convolutional summary network feeding a masked
+autoregressive flow; Section~\ref{sec:method}):
 \begin{enumerate}\itemsep2pt
 \item We subject the learned posterior to the strongest calibration diagnostics in
 the SBI toolkit---simulation-based calibration over the full prior, plus marginal
@@ -164,8 +171,33 @@ the preferentiality parameter---validated against a joint-model NUTS reference
 (change of support), is handled the same way: inference from coarse regional
 totals stays calibrated and widens its uncertainty to match the information lost
 (Section~\ref{sec:agg}).
+\item Finally, we apply the estimators---trained \emph{only} on simulations---to
+a real crime point pattern with no retraining, and show they reproduce a
+gold-standard NUTS analysis (parameters and intensity map) in seconds rather than
+minutes (Section~\ref{sec:real}).
 \end{enumerate}
 All code and experiments are released to reproduce every number and figure.
+Table~\ref{tab:overview} summarizes the experiments.
+
+\begin{table}[t]
+\centering\small
+\caption{Overview of experiments. Four of the seven are validated head-to-head
+against a gold-standard No-U-Turn Sampler (NUTS).}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Experiment (\S) & Inferential target & Validated against & Headline result \\
+\midrule
+Calibration (\ref{sec:calibration}) & parameters & prior (SBC) & passes SBC; regressor fails \\
+MCMC benchmark (\ref{sec:mcmc}) & parameters & NUTS & C2ST \CtstMean, $\Speedup\times$ faster \\
+Intensity surface (\ref{sec:field}) & latent field & NUTS & map corr.\ \FieldMcmcMeanCorr; aggregates calibrated \\
+Misspecification (\ref{sec:misspec}) & parameters & --- & graceful, diagnosable degradation \\
+Preferential samp.\ (\ref{sec:pref}) & params + $\gamma$ & NUTS & unbiased; corrects biased baseline \\
+Change of support (\ref{sec:agg}) & parameters & NUTS & calibrated; uncertainty tracks info.\ loss \\
+Real data (\ref{sec:real}) & params + field & NUTS & zero-shot; map corr.\ \RealFieldCorr \\
+\bottomrule
+\end{tabular}
+\label{tab:overview}
+\end{table}
 
 \section{Background}
 
