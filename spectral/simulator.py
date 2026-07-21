@@ -60,6 +60,9 @@ class SpectralLGCP:
         if self.nu == 1.5:
             s = math.sqrt(3) * r / ell
             return (sigma ** 2) * (1 + s) * np.exp(-s)
+        if self.nu == 2.5:
+            s = math.sqrt(5) * r / ell
+            return (sigma ** 2) * (1 + s + s ** 2 / 3.0) * np.exp(-s)
         raise ValueError(self.nu)
 
     def spectrum(self, sigma, ell):
