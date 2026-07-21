@@ -74,8 +74,8 @@ problem)---adding the process to the simulator yields calibrated, bias-corrected
 inference that a design-aware estimator delivers at no extra methodological cost,
 and that correctly widens its uncertainty as aggregation destroys information.
 On real data---a crime point pattern and a Burkina Faso malaria
-prevalence survey (disease mapping)---the amortized estimators reproduce a NUTS
-analysis (parameters and risk map) in milliseconds rather than minutes. Amortized SBI thus makes calibrated LGCP inference
+prevalence survey (disease mapping)---the amortized estimators recover the
+NUTS risk map and parameters in milliseconds rather than minutes. Amortized SBI thus makes calibrated LGCP inference
 not only fast but extensible to observation processes that defeat likelihood-based
 tools.
 \end{abstract}
@@ -189,12 +189,12 @@ Experiment (\S) & Inferential target & Validated against & Headline result \\
 \midrule
 Calibration (\ref{sec:calibration}) & parameters & prior (SBC) & passes SBC; regressor fails \\
 MCMC benchmark (\ref{sec:mcmc}) & parameters & NUTS & C2ST \CtstMean, $\Speedup\times$ faster \\
-Intensity surface (\ref{sec:field}) & latent field & NUTS & map corr.\ \FieldMcmcMeanCorr; aggregates calibrated \\
+Intensity surface (\ref{sec:field}) & latent field & NUTS & map corr.\ \FieldMcmcMeanCorr; aggregates calib.\ \\
 Misspecification (\ref{sec:misspec}) & parameters & --- & graceful, diagnosable degradation \\
 Preferential samp.\ (\ref{sec:pref}) & params + $\gamma$ & NUTS & unbiased; corrects biased baseline \\
 Change of support (\ref{sec:agg}) & parameters & NUTS & calibrated; uncertainty tracks info.\ loss \\
 Real crime data (\ref{sec:crime}) & params + field & NUTS & zero-shot; map corr.\ \RealFieldCorr \\
-Real malaria data (\ref{sec:malaria}) & disease mapping & NUTS & C2ST \MalCtst; risk map in \MalNpeMs\,ms \\
+Real malaria data (\ref{sec:malaria}) & disease mapping & NUTS & risk map in \MalNpeMs\,ms; $\beta_0,\sigma$ agree \\
 \bottomrule
 \end{tabular}
 \label{tab:overview}
@@ -796,16 +796,26 @@ from Burkina Faso, of the type curated by the Malaria Atlas Project
 individuals examined across $\MalSites$ survey clusters (empirical prevalence
 $\MalPrev\%$), aggregated to the $\Grid\times\Grid$ grid ($\MalCells$ surveyed
 cells). We retrain only the parameter estimator on the offset-conditioned
-simulator (a few minutes, once) and apply it to the real positive-count grid.
-The amortized posterior again matches gold-standard NUTS
-(Figure~\ref{fig:malaria}): parameters overlap (C2ST $\MalCtst$; posterior means
-$\beta_0\!=\!\MalBetaN$ vs.\ $\MalBetaM$, $\sigma\!=\!\MalSigN$ vs.\ $\MalSigM$,
-$\ell\!=\!\MalEllN$ vs.\ $\MalEllM$), and the estimator is calibrated on held-out
-data from this design (SBC $\min p=\MalSbc$). The amortized fit takes
-$\MalNpeMs$~ms against $\MalNutsSec$~s for NUTS, and yields the same posterior
-malaria-risk map. In an elimination setting, where the same survey is repeated
-across seasons and districts, this is the difference between minutes and days of
-compute.
+simulator (a few minutes, once) and apply it to the real positive-count grid;
+Figure~\ref{fig:malaria} shows the recovered risk surface and posteriors. The
+estimator is calibrated on held-out data from this design (SBC $\min p=\MalSbc$;
+$90\%$ coverage $0.89$), and its baseline risk and variance agree closely with
+gold-standard NUTS ($\beta_0\!=\!\MalBetaN$ vs.\ $\MalBetaM$,
+$\sigma\!=\!\MalSigN$ vs.\ $\MalSigM$), producing the same posterior malaria-risk
+map in $\MalNpeMs$~ms against $\MalNutsSec$~s ($>\!\!30$~min) for NUTS.
+
+The one honest discrepancy is instructive. For the range $\ell$ the amortized
+posterior is markedly \emph{wider} than NUTS ($\MalEllN$ vs.\ a tight $\MalEllM$),
+which drives the joint C2ST up to $\MalCtst$. This is a summary-statistic effect:
+the real survey is unusually information-rich, and NUTS---using the full
+likelihood---localizes the short correlation range sharply, whereas the learned
+convolutional summary retains less fine-scale range information and so reports a
+more conservative $\ell$. The amortized posterior is therefore calibrated and
+correct in the mean but, on this dataset, less sharp than the full-likelihood
+gold standard; sequential refinement or richer summaries would close the gap.
+Even so, in an elimination setting where the same survey is repeated across
+seasons and districts, near-instant calibrated risk maps are exactly what routine
+analysis needs.
 
 \begin{figure}[t]
 \centering

@@ -66,7 +66,8 @@ def main():
         if p == 0:
             ax.set_ylabel("density"); ax.legend(fontsize=8, loc="upper left")
     fig.suptitle(f"Malaria risk mapping (Burkina Faso, {res['n_sites']} clusters): "
-                 f"amortized inference matches NUTS in {res['t_npe_ms']:.0f} ms vs {res['t_nuts_s']:.0f} s",
+                 f"amortized disease mapping in {res['t_npe_ms']:.0f} ms vs "
+                 f"{res['t_nuts_s']/60:.0f} min for NUTS",
                  fontsize=10)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     save(fig, "fig_malaria.pdf")
