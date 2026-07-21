@@ -132,6 +132,40 @@ def run_nuts_field(y_grid, coords, area, nu=0.5, num_warmup=500, num_samples=500
 jitter_default = 1e-5
 
 
+def run_nuts_diseasemap(Y_grid, E_grid, coords, nu=0.5, num_warmup=1000,
+                        num_samples=1000, num_chains=3, seed=0, return_field=False,
+                        beta0_low=-3.5, beta0_high=-0.1):
+    """NUTS for the Poisson-offset disease-mapping LGCP. Y ~ Poisson(E exp(Z))."""
+    Y = jnp.asarray(np.asarray(Y_grid).reshape(-1).astype(np.float32))
+    E = jnp.asarray(np.asarray(E_grid).reshape(-1).astype(np.float32))
+    dist_m = _dist_matrix(jnp.asarray(coords)); n = coords.shape[0]; eye = jnp.eye(n)
+    obs_mask = E > 0
+
+    def model(Y):
+        beta0 = numpyro.sample("beta0", dist.Uniform(beta0_low, beta0_high))
+        sigma = numpyro.sample("sigma", dist.Uniform(lgcp.SIGMA_LOW, lgcp.SIGMA_HIGH))
+        ell = numpyro.sample("ell", dist.Uniform(lgcp.ELL_LOW, lgcp.ELL_HIGH))
+        L = jnp.linalg.cholesky(sigma ** 2 * _matern_corr(dist_m, ell, nu) + jitter_default * eye)
+        eta = numpyro.sample("eta", dist.Normal(0.0, 1.0).expand([n]))
+        Z = numpyro.deterministic("Z", beta0 + L @ eta)
+        rate = jnp.where(obs_mask, E * jnp.exp(Z), 1.0)
+        with numpyro.handlers.mask(mask=obs_mask):
+            numpyro.sample("Y", dist.Poisson(rate), obs=Y)
+
+    kernel = NUTS(model, target_accept_prob=0.9, max_tree_depth=9)
+    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples,
+                num_chains=num_chains, chain_method="sequential", progress_bar=False)
+    t0 = time.time(); mcmc.run(jax.random.PRNGKey(seed), Y=Y); wall = time.time() - t0
+    s = mcmc.get_samples()
+    theta = np.stack([np.asarray(s[k]) for k in ("beta0", "sigma", "ell")], axis=1)
+    grouped = mcmc.get_samples(group_by_chain=True)
+    rhat = {k: float(_split_rhat(np.asarray(grouped[k]))) for k in ("beta0", "sigma", "ell")}
+    out = {"theta": theta, "wall": wall, "rhat": rhat}
+    if return_field:
+        out["Z"] = np.asarray(s["Z"])
+    return out
+
+
 def run_nuts_aggregated(r_region, coords, area, G, C, nu=0.5, num_warmup=600,
                         num_samples=500, num_chains=2, seed=0):
     """NUTS for the change-of-support model: observe C x C region totals ``r``,

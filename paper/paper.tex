@@ -73,9 +73,9 @@ aggregation} (only coarse regional totals observed, the change-of-support
 problem)---adding the process to the simulator yields calibrated, bias-corrected
 inference that a design-aware estimator delivers at no extra methodological cost,
 and that correctly widens its uncertainty as aggregation destroys information.
-On a real crime point pattern the estimators---trained only on simulations---
-reproduce a NUTS analysis (parameters and intensity map) with no retraining, in
-seconds rather than minutes. Amortized SBI thus makes calibrated LGCP inference
+On real data---a crime point pattern and a Burkina Faso malaria
+prevalence survey (disease mapping)---the amortized estimators reproduce a NUTS
+analysis (parameters and risk map) in milliseconds rather than minutes. Amortized SBI thus makes calibrated LGCP inference
 not only fast but extensible to observation processes that defeat likelihood-based
 tools.
 \end{abstract}
@@ -171,18 +171,18 @@ the preferentiality parameter---validated against a joint-model NUTS reference
 (change of support), is handled the same way: inference from coarse regional
 totals stays calibrated and widens its uncertainty to match the information lost
 (Section~\ref{sec:agg}).
-\item Finally, we apply the estimators---trained \emph{only} on simulations---to
-a real crime point pattern with no retraining, and show they reproduce a
-gold-standard NUTS analysis (parameters and intensity map) in seconds rather than
-minutes (Section~\ref{sec:real}).
+\item Finally, we apply the approach to two real datasets---a crime point pattern
+(zero-shot, no retraining) and a Burkina Faso malaria prevalence survey (disease
+mapping via a Poisson-offset LGCP)---and show it reproduces a gold-standard NUTS
+analysis, parameters and risk map alike, in milliseconds (Section~\ref{sec:real}).
 \end{enumerate}
 All code and experiments are released to reproduce every number and figure.
 Table~\ref{tab:overview} summarizes the experiments.
 
 \begin{table}[t]
 \centering\small
-\caption{Overview of experiments. Four of the seven are validated head-to-head
-against a gold-standard No-U-Turn Sampler (NUTS).}
+\caption{Overview of experiments. Most are validated head-to-head against a
+gold-standard No-U-Turn Sampler (NUTS), including on two real datasets.}
 \begin{tabular}{@{}llll@{}}
 \toprule
 Experiment (\S) & Inferential target & Validated against & Headline result \\
@@ -193,7 +193,8 @@ Intensity surface (\ref{sec:field}) & latent field & NUTS & map corr.\ \FieldMcm
 Misspecification (\ref{sec:misspec}) & parameters & --- & graceful, diagnosable degradation \\
 Preferential samp.\ (\ref{sec:pref}) & params + $\gamma$ & NUTS & unbiased; corrects biased baseline \\
 Change of support (\ref{sec:agg}) & parameters & NUTS & calibrated; uncertainty tracks info.\ loss \\
-Real data (\ref{sec:real}) & params + field & NUTS & zero-shot; map corr.\ \RealFieldCorr \\
+Real crime data (\ref{sec:crime}) & params + field & NUTS & zero-shot; map corr.\ \RealFieldCorr \\
+Real malaria data (\ref{sec:malaria}) & disease mapping & NUTS & C2ST \MalCtst; risk map in \MalNpeMs\,ms \\
 \bottomrule
 \end{tabular}
 \label{tab:overview}
@@ -733,17 +734,23 @@ content.}
 \label{fig:aggresults}
 \end{figure}
 
-\section{A real-data case study}
+\section{Real-data applications}
 \label{sec:real}
 
 Everything so far is simulated, which is what makes calibration and gold-standard
-comparison possible. We close with a real point pattern to show the pipeline
-transfers. We use the \texttt{crimes} pattern from the geodanet example dataset distributed
-with the PySAL library \citep{rey2007pysal}: $\RealN$ recorded crime locations in
-a road-network neighbourhood, binned to the same $\Grid\times\Grid$ grid. Crucially we
-\emph{do not retrain}: the very same NPE and field U-Net used throughout, trained
-only on synthetic LGCPs, are applied to the real grid in a single forward pass
-each---the amortization dividend in its purest form.
+comparison possible. We close with two real datasets: a pure point pattern, and
+a disease-mapping problem---the setting where LGCPs are most used.
+
+\subsection{A crime point pattern}
+\label{sec:crime}
+
+We first take a real point pattern to show the pipeline transfers with
+\emph{no retraining at all}. We use the \texttt{crimes} pattern from the geodanet
+example dataset distributed with the PySAL library \citep{rey2007pysal}: $\RealN$
+recorded crime locations in a road-network neighbourhood, binned to the same
+$\Grid\times\Grid$ grid. Crucially the very same NPE and field U-Net used
+throughout, trained only on synthetic LGCPs, are applied to the real grid in a
+single forward pass each---the amortization dividend in its purest form.
 
 Figure~\ref{fig:real} shows the result. The amortized estimator returns a
 parameter posterior and a full posterior intensity \emph{map} with uncertainty,
@@ -768,6 +775,46 @@ amortized posterior mean and SD of the log-intensity surface (one forward pass
 each, from a network trained only on simulations). \emph{Bottom:} the amortized
 parameter posteriors (blue) against gold-standard NUTS (grey) on the same data.}
 \label{fig:real}
+\end{figure}
+
+\subsection{Malaria risk mapping}
+\label{sec:malaria}
+
+LGCPs are, above all, the workhorse of spatial \emph{disease mapping}, where the
+data are prevalence surveys: at each location one records the number examined
+$E_i$ and the number positive $Y_i$, and the target is the latent risk surface.
+The natural model is a Poisson process with a known offset,
+$Y_i \sim \Pois(E_i\,e^{Z_i})$ with $Z=\beta_0+f$ the log relative-risk field---a
+log-Gaussian Cox model. This differs from the standard LGCP only in the offset,
+so it is again just a change to the simulator: we hold the offset grid at the
+\emph{observed} number examined and simulate positive counts, giving a
+design-specific amortized estimator that reads the real data in one forward pass.
+
+We use publicly released \emph{Plasmodium falciparum} parasite-rate survey data
+from Burkina Faso, of the type curated by the Malaria Atlas Project
+\citep{pfeffer2018malariaatlas}: $\MalPos$ positives among $\MalExam$
+individuals examined across $\MalSites$ survey clusters (empirical prevalence
+$\MalPrev\%$), aggregated to the $\Grid\times\Grid$ grid ($\MalCells$ surveyed
+cells). We retrain only the parameter estimator on the offset-conditioned
+simulator (a few minutes, once) and apply it to the real positive-count grid.
+The amortized posterior again matches gold-standard NUTS
+(Figure~\ref{fig:malaria}): parameters overlap (C2ST $\MalCtst$; posterior means
+$\beta_0\!=\!\MalBetaN$ vs.\ $\MalBetaM$, $\sigma\!=\!\MalSigN$ vs.\ $\MalSigM$,
+$\ell\!=\!\MalEllN$ vs.\ $\MalEllM$), and the estimator is calibrated on held-out
+data from this design (SBC $\min p=\MalSbc$). The amortized fit takes
+$\MalNpeMs$~ms against $\MalNutsSec$~s for NUTS, and yields the same posterior
+malaria-risk map. In an elimination setting, where the same survey is repeated
+across seasons and districts, this is the difference between minutes and days of
+compute.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_malaria.pdf}
+\caption{Malaria risk mapping from Burkina Faso parasite-rate surveys.
+\emph{Top:} observed cluster prevalence; the posterior mean risk surface
+$\exp(Z)$; and its uncertainty. \emph{Bottom:} amortized parameter posteriors
+(blue) versus gold-standard NUTS (grey) for the Poisson-offset LGCP.}
+\label{fig:malaria}
 \end{figure}
 
 \section{Related work}
