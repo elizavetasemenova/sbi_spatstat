@@ -10,3 +10,10 @@ paper/*.blg
 paper/*.bbl
 paper/*.fdb_latexmk
 paper/*.fls
+paper_aistats/*.aux
+paper_aistats/*.log
+paper_aistats/*.out
+paper_aistats/*.blg
+paper_aistats/*.bbl
+paper_aistats/*.fdb_latexmk
+paper_aistats/*.fls
