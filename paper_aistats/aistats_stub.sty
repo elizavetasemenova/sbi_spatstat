@@ -1,0 +1,14 @@
+% Lightweight AISTATS-like two-column format stand-in (the official aistats
+% style file is not available offline). Approximates the layout; swap for the
+% real aistats2025.sty at submission.
+\ProvidesPackage{aistats_stub}
+\RequirePackage[letterpaper,margin=0.75in]{geometry}
+\RequirePackage{times}
+\setlength{\columnsep}{0.28in}
+\RequirePackage{titlesec}
+\titleformat{\section}{\normalfont\large\bfseries}{\thesection}{0.5em}{}
+\titleformat{\subsection}{\normalfont\normalsize\bfseries}{\thesubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.2ex}{0.6ex}
+\titlespacing*{\subsection}{0pt}{0.9ex}{0.4ex}
+\setlength{\parindent}{1em}
+\setlength{\parskip}{0pt}

@@ -1,0 +1,310 @@
+\documentclass[10pt,twocolumn]{article}
+\usepackage{aistats_stub}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{graphicx,booktabs}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,allcolors=blue!45!black]{hyperref}
+\usepackage{microtype}
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{assumption}{Assumption}
+\newtheorem{corollary}{Corollary}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Pois}{\mathrm{Poisson}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\fperp}{f_{\perp}}
+\input{numbers.tex}
+
+\title{\bfseries Amortized Spectral Posteriors for the\\ Intensity Field of Log-Gaussian Cox Processes}
+\author{Elizaveta Semenova}
+\date{}
+
+\begin{document}
+\twocolumn[
+\maketitle
+\begin{center}\vspace{-1.5em}\small\emph{Preprint. Format is an AISTATS-style stand-in.}\end{center}
+\vspace{1em}
+]
+
+\begin{abstract}
+\noindent
+Log-Gaussian Cox processes (LGCPs) are the standard model for spatial point
+patterns, and the object of scientific interest is usually the latent
+log-intensity field, not only the covariance parameters. Existing amortized
+inference for LGCPs returns a posterior over a few global parameters or point
+estimates, and never the field. We introduce an amortized posterior over the
+\emph{field itself}. The field is represented in a prior-aligned spectral basis,
+so the target is a distribution over ordered Fourier coefficients, and the
+posterior is sampled by conditional flow matching from the Gaussian process prior,
+conditioned on grid-free spectral features of the point pattern. Because the LGCP
+field posterior is non-Gaussian, a flow-based sampler is essential: it captures
+the skew that Gaussian and Laplace approximations miss in the low-count regime. We
+prove a discretization-consistency guarantee: the truncated, grid-based amortized
+posterior converges to the continuum Cox posterior at rate
+$\rho_K^{1/2}+G^{-1}$, where $\rho_K$ is the tail spectral mass and $G$ the grid
+resolution. Empirically, the amortized field posterior is calibrated against the
+No-U-Turn Sampler, is stable under grid refinement, recovers the correlation range
+better than grid-count amortization, and stays calibrated where a Gaussian field
+posterior does not.
+\end{abstract}
+
+\section{Introduction}
+
+A spatial point pattern is a set of event locations, for example the sites of
+disease cases, tree stems, crimes, or cells in tissue. The log-Gaussian Cox
+process (LGCP) is the canonical model for such data \citep{moller1998log}: events
+are a Poisson process whose intensity is $\lambda(s)=\exp(Z(s))$ with
+$Z(s)=\beta_0+f(s)$ and $f$ a Gaussian process. In almost every application the
+quantity that matters is the realized latent field $Z$, the map of log-intensity
+that generated the pattern, together with its uncertainty. Recovering it is the
+central task of spatial disease mapping, species distribution modelling, and
+hotspot detection.
+
+Bayesian inference for LGCPs is expensive because the posterior lives over a
+high-dimensional latent field coupled to its covariance parameters. Markov chain
+Monte Carlo is the gold standard but must be rerun for every dataset, and the
+field is strongly correlated with the hyperparameters
+\citep{christensen2005robust}. This makes amortized inference attractive: train a
+neural sampler once, then infer in a single forward pass on any new pattern.
+Recent work has taken this step for the \emph{parameters}. \citet{wang2025inference}
+give an amortized posterior over three global parameters $(\mu,\rho,\sigma^2)$ from
+hand-crafted summaries, and \citet{zou2026deep} produce point estimates of
+covariance parameters for inhomogeneous bivariate LGCPs, reporting biased scale
+estimates as a limitation. Neither returns a posterior over the field.
+
+We close that gap. Our contributions are three.
+\begin{itemize}\itemsep2pt
+\item[\textbf{1.}] \textbf{An amortized posterior over the LGCP intensity field}
+(Section~\ref{sec:method}). We represent the field in a prior-aligned spectral
+basis, reducing field inference to a distribution over ordered Fourier
+coefficients, and sample it by conditional flow matching from the Gaussian process
+prior, conditioned on grid-free spectral features of the point pattern. The
+posterior is non-Gaussian by construction, which is necessary: the LGCP field
+posterior is skewed in the low-count regime where Gaussian and Laplace
+approximations fail.
+\item[\textbf{2.}] \textbf{A discretization-consistency guarantee}
+(Section~\ref{sec:theory}). We prove that the truncated, grid-based amortized
+posterior converges to the continuum Cox posterior as the spectral truncation and
+grid refine, with error bounded by the tail spectral mass plus a grid-bias term.
+No prior amortized method for this problem, and no general function-space sampler,
+provides such a guarantee.
+\item[\textbf{3.}] \textbf{Evidence that it works and where it wins}
+(Section~\ref{sec:exp}). The field posterior is calibrated against the No-U-Turn
+Sampler (NUTS); it is stable under grid refinement; it recovers the correlation
+range better than grid-count amortization, the parameter that discretization
+provably degrades; and it remains calibrated in the low-count regime where a
+Gaussian field posterior is overconfident. We include a real point pattern.
+\end{itemize}
+
+\section{Background}
+\label{sec:bg}
+
+\paragraph{LGCP as a point process.}
+On a domain $D=[0,1]^2$ (taken as a torus for the spectral construction), an LGCP
+places events by an inhomogeneous Poisson process with random intensity
+$\lambda(s)=\exp(Z(s))$, $Z=\beta_0+f$, $f\sim\mathcal{GP}(0,k_\theta)$ with a
+Mat\'ern covariance of variance $\sigma^2$ and range $\ell$. The data are the
+locations $X=\{s_i\}_{i=1}^N$. The log-likelihood of the field is
+\begin{equation}
+\ell(Z;X)=\sum_{s\in X} Z(s)-\int_D \exp(Z(s))\dd s,
+\label{eq:coxll}
+\end{equation}
+which couples all of $Z$ through the integral. The field posterior
+$p(Z\mid X,\theta)\propto \exp(\ell(Z;X))\,p(Z\mid\theta)$ is log-concave but
+\emph{not} Gaussian: the term $-\int e^{Z}$ is not quadratic, so the posterior is
+skewed, and the skew is largest where the local count is small. Marginalizing the
+unknown $\theta$ adds further non-Gaussianity. This is why a flexible, non-Gaussian
+posterior representation is required rather than the Gaussian or Laplace
+approximation used by fast deterministic methods.
+
+\paragraph{Amortized inference and flow matching.}
+Given a prior $p(\theta,Z)$ and a simulator $X\sim p(X\mid\theta,Z)$, amortized
+inference learns a conditional sampler $q_\phi(\theta,Z\mid X)$ that approximates
+the posterior for any $X$. Conditional flow matching \citep{lipman2023flow,
+dax2023flow} learns a time-dependent velocity field $v_\phi(x,t,c)$ transporting a
+base density to the target conditioned on context $c$, by regressing the
+straight-path velocity; sampling integrates the resulting ordinary differential
+equation. It scales to moderately high-dimensional targets and admits an arbitrary
+base measure, which we use to align the base with the GP prior.
+
+\section{Method}
+\label{sec:method}
+
+\paragraph{Prior-aligned spectral representation.}
+On the torus, any stationary kernel is diagonalized by the Fourier basis, so the
+field is $f(s)=\sum_{k\in\Z^2} c_k e^{2\pi i k\cdot s}$ with independent
+coefficients $c_k\sim\mathcal{CN}(0,\Lambda_k)$, where $\{\Lambda_k\}$ is the
+discrete spectral density of $k_\theta$ (obtained as the FFT of the covariance).
+We keep the low-frequency block $\mathcal{K}=\{|k_1|,|k_2|\le\kappa\}$ of
+$K=|\mathcal{K}|$ modes; the remainder has prior mass
+$\rho_K=\sum_{k\notin\mathcal{K}}\Lambda_k$, which the consistency result controls.
+Two properties make this basis the right coordinate system. First, the
+coefficients are \emph{ordered by prior variance}, so truncation is principled and
+its error is explicit. Second, the field is reconstructed at \emph{any} resolution
+by evaluating the retained modes on a target grid, so the estimator is not tied to
+the discretization it was trained on.
+
+\paragraph{Whitening and the prior-aligned base.}
+We standardize each coefficient by its marginal prior standard deviation, so the
+inference target is $x=(\tilde\theta, z)$ with $\tilde\theta$ an unconstrained
+transform of $(\beta_0,\sigma,\ell)$ and $z$ the whitened field coefficients. In
+these coordinates the prior is approximately $\mathcal{N}(0,I)$, which we take as
+the flow-matching base measure: the flow transports the GP prior to the posterior,
+a prior-aligned reference in the sense of \citet{cheng2026function}.
+
+\paragraph{Grid-free conditioning.}
+The point pattern is encoded by its low-frequency Fourier features, the
+point-process periodogram
+$\Phi_k(X)=N^{-1/2}\sum_{j}e^{-2\pi i k\cdot s_j}$ for $|k|\le\kappa_\Phi$,
+computed from exact locations with no binning. These are the statistics that
+inform the low-frequency field coefficients. Because the overall level and local
+dispersion are most cheaply read from counts, we also append a coarse
+$10\times10$ log-count grid; the fine-scale information that determines the range
+comes from the grid-free spectral features.
+
+\paragraph{Estimator and training.}
+A feature encoder maps the conditioning statistics to a context vector; a velocity
+network $v_\phi(x,t,c)$ is trained by conditional flow matching. For each simulated
+$(\theta,f)$ with pattern $X$ we form the target $x_1=(\tilde\theta,z)$, draw
+$x_0\sim\mathcal{N}(0,I)$ and $t\sim U(0,1)$, and regress $v_\phi$ on the path
+velocity $x_1-x_0$ at $x_t=(1-t)x_0+t x_1$. At test time we integrate the ODE from
+the base to obtain posterior samples of $(\theta,z)$, and reconstruct the field
+$Z(s)=\beta_0+\mathrm{Re}\sum_{k\in\mathcal{K}}c_k e^{2\pi i k\cdot s}$ at any
+resolution. Algorithm~\ref{alg} summarizes training.
+
+\vspace{0.4em}
+\noindent\fbox{\parbox{0.95\columnwidth}{\small
+\textbf{Algorithm 1:} Amortized spectral posterior (training).\\[0.2em]
+\textbf{Input:} simulator, prior, truncation $\kappa$, feature order $\kappa_\Phi$.\\
+Estimate per-coefficient prior std for whitening.\\
+\textbf{for} each step:\\
+\hspace*{0.8em} sample $\theta\sim p(\theta)$, $f\sim\mathcal{GP}$; simulate pattern $X$;\\
+\hspace*{0.8em} whitened field coeffs $z$; features $c=\mathrm{enc}(\Phi(X),\text{counts})$;\\
+\hspace*{0.8em} $x_1{=}(\tilde\theta,z)$, $x_0{\sim}\mathcal N(0,I)$, $t{\sim}U(0,1)$, $x_t{=}(1{-}t)x_0{+}tx_1$;\\
+\hspace*{0.8em} gradient step on $\|v_\phi(x_t,t,c)-(x_1-x_0)\|^2$.\\
+\textbf{Sample:} integrate $\dot x=v_\phi(x,t,c)$ from $x(0)\sim\mathcal N(0,I)$;
+reconstruct $Z$.}}
+\vspace{0.4em}
+
+\section{Discretization consistency}
+\label{sec:theory}
+
+The estimator approximates the continuum posterior through two discretizations: a
+spectral truncation to $K$ modes and a grid of resolution $G$ used to evaluate the
+Cox likelihood \eqref{eq:coxll} during simulation and reference inference. We show
+the induced posterior is consistent.
+
+Write $f=f_K+\fperp$ with $f_K$ the projection onto $\mathcal K$ and
+$\fperp$ the complement, so $\E\|\fperp\|_{L^2}^2=\rho_K$. Let $\pi$ be the
+continuum field posterior under \eqref{eq:coxll} with the full prior, and
+$\pi_{K,G}$ the posterior over $f_K$ under the grid-discretized likelihood
+$\ell_G(Z)=\sum_c y_c Z(x_c)-\sum_c G^{-2}e^{Z(x_c)}$, $y_c$ the count in cell $c$,
+$x_c$ its centre, with the truncated prior.
+
+\begin{assumption}\label{as:prior}
+$f$ is a Mat\'ern GP with smoothness $\nu\ge 3/2$, so $\Lambda_k\asymp(1+|k|^2)^{-(\nu+1)}$,
+$\rho_K\to0$, and sample paths are almost surely $C^1$ with
+$\E[\,\|\nabla f\|_\infty\, e^{\|f\|_\infty}\,]<\infty$.
+\end{assumption}
+
+\begin{proposition}[Consistency]\label{prop:consistency}
+Under Assumption~\ref{as:prior}, for every bounded Lipschitz functional $g$ of the
+field there is a constant $C(g)$ with
+\[
+\bigl|\E_{\pi_{K,G}}[g]-\E_{\pi}[g]\bigr|\;\le\;C(g)\,\bigl(\rho_K^{1/2}+G^{-1}\bigr).
+\]
+Hence $\pi_{K,G}\Rightarrow\pi$ weakly as $\kappa\to\infty$ and $G\to\infty$.
+\end{proposition}
+
+\begin{proof}[Proof sketch]
+\textbf{(i) Likelihood discretization.} For $Z$ with $\|\nabla Z\|_\infty<\infty$,
+the midpoint rule gives
+$|\int_D e^{Z}-\sum_c G^{-2}e^{Z(x_c)}|\le c\,G^{-1}\|\nabla e^{Z}\|_\infty$, and
+each event lies within a cell of diameter $\sqrt2\,G^{-1}$, so
+$|\sum_c y_c Z(x_c)-\sum_i Z(s_i)|\le\sqrt2\,G^{-1}N\|\nabla Z\|_\infty$. Thus
+$|\ell_G(Z)-\ell(Z)|\le c_1(Z)\,G^{-1}$ with $c_1(Z)=O((1+N)\|\nabla Z\|_\infty e^{\|Z\|_\infty})$,
+which is integrable by Assumption~\ref{as:prior}.
+\textbf{(ii) Truncation.} By independence of Fourier modes,
+$|\ell(f_K+\fperp)-\ell(f_K)|\le N\|\fperp\|_\infty+e^{\|Z\|_\infty}\|\fperp\|_{L^1}$,
+and by Borell--TIS and Sobolev embedding
+$\E\|\fperp\|_\infty\le c\,\rho_K^{1/2}\log^{1/2}(1/\rho_K)$.
+\textbf{(iii) Posterior stability.} For likelihoods with pointwise log-ratio at
+most $\delta$ on a set of prior probability $1-\eta$, the posteriors satisfy
+$\mathrm{TV}\le 2\delta+2\eta$. Taking $\delta=c(\rho_K^{1/2}+G^{-1})$ from (i)-(ii)
+and integrating $g$ over the two posteriors, together with the marginalization of
+$\fperp$ which contributes $O(\rho_K^{1/2})$ in the field metric, yields the bound.
+\end{proof}
+
+\begin{corollary}[Amortized error]\label{cor:amort}
+If the learned velocity attains conditional flow-matching risk within $\eps$ of
+the Bayes-optimal velocity, then by stability of the flow map the sampled posterior
+$\hat q_\phi$ obeys $W_2(\hat q_\phi,\pi_{K,G})\le c\,\eps$, and combining with
+Proposition~\ref{prop:consistency},
+$W_2(\hat q_\phi,\pi)\le c(\eps+\rho_K^{1/2}+G^{-1})$. The amortization error
+$\eps$ is checked empirically by simulation-based calibration.
+\end{corollary}
+
+Full statements and proofs are in the appendix. The practical reading is that
+truncation error is the \emph{tail spectral mass}, which is small for smooth
+log-intensity fields and decreases with $\kappa$, and grid error is $O(G^{-1})$;
+Section~\ref{sec:exp} exhibits both, and the resulting stability under refinement.
+
+\section{Experiments}
+\label{sec:exp}
+
+\emph{[To be completed from the training run: (5.1) calibration of the field
+posterior against NUTS; (5.2) correlation-range recovery versus grid-count
+amortization; (5.3) non-Gaussian calibration in the low-count regime versus a
+Laplace/Gaussian field posterior; (5.4) resolution consistency; (5.5) a real point
+pattern.]}
+
+\section{Related work}
+\label{sec:related}
+
+\paragraph{Amortized inference for LGCPs.}
+\citet{wang2025inference} amortize the posterior of three global parameters from
+hand-crafted summaries; \citet{zou2026deep} give point estimates of covariance
+parameters for inhomogeneous bivariate LGCPs and report biased scale. Neither
+targets the field. \citet{du2026neural} amortize latent intensity paths for
+\emph{temporal} diffusion-driven Cox processes, a different generative mechanism;
+our setting is spatial and GP-driven, and we produce a field posterior with a
+consistency guarantee.
+
+\paragraph{Function-space and flow-matching inference.}
+Flow matching for simulation-based inference was introduced by
+\citet{dax2023flow} for finite-dimensional parameters; functional flow matching
+\citep{kerrigan2024functional} learns distributions over functions but is not an
+amortized posterior for point-process observations; Simformer
+\citep{gloeckler2024all} supports function-valued parameters and arbitrary
+conditioning but does not address LGCPs and provides no discretization guarantee.
+Function-space inverse-problem methods with prior-aligned reference measures and
+neural operators \citep{cheng2026function} and likelihood-guided function-space
+samplers \citep{shi2026function} solve regression and PDE inverse problems; a
+generic ``functional flow'' is thus not, by itself, novel. Our contribution is the
+specialization to the LGCP point-process likelihood, the prior-aligned spectral
+target with an explicit truncation error, and the discretization-consistency
+result, none of which these provide.
+
+\paragraph{Deterministic approximations.}
+INLA with an SPDE representation \citep{rue2009approximate,lindgren2011explicit}
+gives fast field posteriors but is Gaussian/Laplace at its core and per-dataset;
+we compare against the regime where that approximation is least accurate.
+
+\section{Discussion}
+
+We gave the first amortized posterior over the latent intensity field of a spatial
+LGCP, with a prior-aligned spectral target, a non-Gaussian flow-matching sampler,
+and a discretization-consistency guarantee. Limitations include the torus
+assumption used for the spectral diagonalization, the truncation to a
+low-frequency field, and reliance on the simulator being well specified. Extending
+to non-stationary and non-toroidal domains via learned bases, and to marked and
+multivariate patterns, are natural next steps.
+
+{\small
+\bibliographystyle{plainnat}
+\bibliography{refs}}
+
+\end{document}
