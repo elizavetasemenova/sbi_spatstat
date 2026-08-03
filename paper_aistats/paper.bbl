@@ -1,0 +1,100 @@
+\begin{thebibliography}{13}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[{Cheng et al.}(2026)]{cheng2026function}
+{Cheng et al.}
+\newblock Function-space inference for inverse problems with prior-aligned
+  reference measures.
+\newblock \emph{arXiv preprint arXiv:2603.14798}, 2026.
+
+\bibitem[Christensen et~al.(2006)Christensen, Roberts, and
+  Sk{\"o}ld]{christensen2005robust}
+Ole~F Christensen, Gareth~O Roberts, and Martin Sk{\"o}ld.
+\newblock Robust {M}arkov chain {M}onte {C}arlo methods for spatial generalized
+  linear mixed models.
+\newblock \emph{Journal of Computational and Graphical Statistics}, 15\penalty0
+  (1):\penalty0 1--17, 2006.
+
+\bibitem[Dax et~al.(2023)Dax, Wildberger, Buchholz, Green, Macke, and
+  Sch{\"o}lkopf]{dax2023flow}
+Maximilian Dax, Jonas Wildberger, Simon Buchholz, Stephen~R Green, Jakob~H
+  Macke, and Bernhard Sch{\"o}lkopf.
+\newblock Flow matching for scalable simulation-based inference.
+\newblock \emph{Advances in Neural Information Processing Systems (NeurIPS)},
+  2023.
+\newblock arXiv:2305.17161.
+
+\bibitem[{Du et al.}(2026)]{du2026neural}
+{Du et al.}
+\newblock Neural diffusion intensity models for {C}ox processes.
+\newblock \emph{arXiv preprint arXiv:2602.24083}, 2026.
+
+\bibitem[Gloeckler et~al.(2024)Gloeckler, Deistler, Weilbach, Wood, and
+  Macke]{gloeckler2024all}
+Manuel Gloeckler, Michael Deistler, Christian Weilbach, Frank Wood, and Jakob~H
+  Macke.
+\newblock All-in-one simulation-based inference.
+\newblock In \emph{International Conference on Machine Learning (ICML)}, 2024.
+
+\bibitem[Kerrigan et~al.(2024)Kerrigan, Migliorini, and
+  Smyth]{kerrigan2024functional}
+Gavin Kerrigan, Giosue Migliorini, and Padhraic Smyth.
+\newblock Functional flow matching.
+\newblock \emph{International Conference on Artificial Intelligence and
+  Statistics (AISTATS)}, 2024.
+\newblock arXiv:2305.17209.
+
+\bibitem[Lindgren et~al.(2011)Lindgren, Rue, and
+  Lindstr{\"o}m]{lindgren2011explicit}
+Finn Lindgren, H{\aa}vard Rue, and Johan Lindstr{\"o}m.
+\newblock An explicit link between {G}aussian fields and {G}aussian {M}arkov
+  random fields: the stochastic partial differential equation approach.
+\newblock \emph{Journal of the Royal Statistical Society: Series B},
+  73\penalty0 (4):\penalty0 423--498, 2011.
+
+\bibitem[Lipman et~al.(2023)Lipman, Chen, Ben-Hamu, Nickel, and
+  Le]{lipman2023flow}
+Yaron Lipman, Ricky T.~Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le.
+\newblock Flow matching for generative modeling.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2023.
+
+\bibitem[M{\o}ller et~al.(1998)M{\o}ller, Syversveen, and
+  Waagepetersen]{moller1998log}
+Jesper M{\o}ller, Anne~Randi Syversveen, and Rasmus~Plenge Waagepetersen.
+\newblock Log {G}aussian {C}ox processes.
+\newblock \emph{Scandinavian Journal of Statistics}, 25\penalty0 (3):\penalty0
+  451--482, 1998.
+
+\bibitem[Rue et~al.(2009)Rue, Martino, and Chopin]{rue2009approximate}
+H{\aa}vard Rue, Sara Martino, and Nicolas Chopin.
+\newblock Approximate {B}ayesian inference for latent {G}aussian models by
+  using integrated nested {L}aplace approximations.
+\newblock \emph{Journal of the Royal Statistical Society: Series B},
+  71\penalty0 (2):\penalty0 319--392, 2009.
+
+\bibitem[{Shi et al.}(2026)]{shi2026function}
+{Shi et al.}
+\newblock {FAPS}: function-space posterior sampling for inverse problems.
+\newblock \emph{arXiv preprint arXiv:2606.22346}, 2026.
+
+\bibitem[Wang et~al.(2026)Wang, Wikle, Micheas, Mark~Welch, Starr, and
+  Lee]{wang2025inference}
+Shuwan Wang, Christopher~K Wikle, Athanasios~C Micheas, Jessica~L Mark~Welch,
+  Jacqueline~R Starr, and Kyu~Ha Lee.
+\newblock Inference for stationary log-{G}aussian {C}ox point processes using
+  {B}ayesian deep learning: application to human oral microbiome image data.
+\newblock \emph{Spatial Statistics}, 73:\penalty0 100973, 2026.
+\newblock arXiv:2502.12334.
+
+\bibitem[{Zou et al.}(2026)]{zou2026deep}
+{Zou et al.}
+\newblock Deep simulation-based inference for inhomogeneous bivariate
+  log-{G}aussian {C}ox processes.
+\newblock \emph{arXiv preprint arXiv:2607.13113}, 2026.
+
+\end{thebibliography}
