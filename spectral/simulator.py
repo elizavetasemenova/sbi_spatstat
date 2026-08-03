@@ -114,6 +114,44 @@ class SpectralLGCP:
         feat = np.concatenate([[math.log1p(N)], phi.real, phi.imag]).astype(np.float32)
         return feat
 
+    def second_order_features(self, pts, radii, nquant=8, cap=400, seed=0):
+        """Classic grid-free second-order summaries of the pattern, all computed
+        from exact locations with toroidal geometry:
+
+        - quantiles of the nearest-neighbour distance distribution (the empirical
+          G-function), which is sensitive to clustering scale;
+        - pair-inclusion probabilities P(d < r) at a set of radii (an
+          intensity-normalised Ripley-K/pair-correlation summary), which carry the
+          correlation-range information a count grid discards.
+
+        These reinforce the low-frequency periodogram with the short-range
+        structure that determines the range parameter.
+        """
+        n_feat = nquant + len(radii)
+        N = pts.shape[0]
+        if N < 3:
+            return np.zeros(n_feat, np.float32)
+        from scipy.spatial import cKDTree
+        P = pts % 1.0
+        tree = cKDTree(P, boxsize=1.0)
+        dd, _ = tree.query(P, k=2)                       # k=1 is the point itself
+        nn = dd[:, 1]
+        nnq = np.quantile(nn, np.linspace(0.1, 0.9, nquant))
+        # pair-inclusion probabilities on a capped subsample (a probability, so
+        # subsampling leaves it unbiased); minimum-image distances on the torus
+        if N > cap:
+            idx = np.random.default_rng(seed).choice(N, cap, replace=False)
+            sub = P[idx]
+        else:
+            sub = P
+        d = sub[:, None, :] - sub[None, :, :]
+        d = d - np.round(d)                              # minimum image, unit torus
+        dist = np.sqrt((d ** 2).sum(-1))
+        iu = np.triu_indices(sub.shape[0], 1)
+        dv = np.sort(dist[iu])
+        Kr = np.searchsorted(dv, np.asarray(radii)) / dv.size   # P(d < r), vectorised
+        return np.concatenate([nnq, Kr]).astype(np.float32)
+
     def field_coefficients(self, Z, beta0, kmax):
         """Low-frequency Fourier coefficients of the field f = Z - beta0.
 

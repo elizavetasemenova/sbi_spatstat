@@ -44,6 +44,7 @@ def generate(n, M=64, nu=1.5, kmax=6, feat_kmax=8, seed=0, prior_std=None, sim=N
     fields = np.zeros((n, M, M), np.float32)
     Gc = 10                                                # coarse count summary
     Gfine = count_grid                                     # baseline: binned-count grid
+    radii = np.linspace(0.02, 0.30, 12)                    # pair-inclusion radii
     for i in range(n):
         b0, sig, ell = theta[i]
         Z = sim.sample_field(b0, sig, ell, rng)
@@ -55,7 +56,10 @@ def generate(n, M=64, nu=1.5, kmax=6, feat_kmax=8, seed=0, prior_std=None, sim=N
         else:
             spec = sim.point_features(pts, feat_kmax)      # grid-free spectral features
             cc = _coarse_counts(pts, Gc)                   # anchors level / variance
-            feats.append(np.concatenate([spec, cc]))
+            parts = [spec, cc]
+            if feature_mode == "spectral2":                # + grid-free 2nd-order
+                parts.append(sim.second_order_features(pts, radii, seed=seed + i))
+            feats.append(np.concatenate(parts))
     PHI = np.stack(feats).astype(np.float32)
     theta_u = priors.to_unit(theta)
     x1 = np.concatenate([theta_u, coeffs / prior_std[None]], axis=1).astype(np.float32)

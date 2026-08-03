@@ -29,18 +29,14 @@ def load(ckpt_path):
     return m, cfg, ps
 
 
-spec_model, cfg, ps = load(R + "spec_fmpe.pt")
+from spectral import data as D
+
+spec_model, cfg, ps = load(R + "spec_v2.pt")
 sim = SpectralLGCP(M=cfg["M"], nu=cfg["nu"]); basis = SpectralBasis(cfg["kmax"])
-M = cfg["M"]
-
-d = np.load(R + "spec_test.npz")
-theta_true = d["theta"]; phi = d["phi"]; fields = d["fields"]
-nf = fields.shape[0]
-N = min(1500, theta_true.shape[0])                     # cap for tractable CPU sampling
-theta_true = theta_true[:N]; phi = phi[:N]
+M = cfg["M"]; MODE = cfg["mode"]; N = 1200
 
 
-def batched_sample(model, phi_np, n_per=300, steps=80, bs=250):
+def batched_sample(model, phi_np, n_per=250, steps=80, bs=120):
     ph = torch.tensor(phi_np); out = []
     with torch.no_grad():
         for s in range(0, ph.shape[0], bs):
@@ -48,16 +44,27 @@ def batched_sample(model, phi_np, n_per=300, steps=80, bs=250):
     return np.concatenate(out, 0)
 
 
-# posterior draws from the spectral model (cached so reruns are instant)
-_cache = R + "fig_samples.npz"
-if os.path.exists(_cache) and np.load(_cache)["S"].shape[0] == N:
-    S = np.load(_cache)["S"]
+# test set (seed 2) + disjoint calibration set (seed 3) for recalibration
+te = D.generate(N, seed=2, prior_std=ps, sim=sim, basis=basis, feat_kmax=cfg["fkmax"], feature_mode=MODE)
+cal = D.generate(N, seed=3, prior_std=ps, sim=sim, basis=basis, feat_kmax=cfg["fkmax"], feature_mode=MODE)
+theta_true = te["theta"]; phi = te["phi"]; fields = te["fields"]; nf = fields.shape[0]
+
+# posterior draws (cached so reruns are instant)
+_cache = R + "fig_samples_v2.npz"
+if os.path.exists(_cache):
+    z = np.load(_cache); S = z["S"]; Scal = z["Scal"]
 else:
-    S = batched_sample(spec_model, phi, n_per=300)     # [N,300,dim]
-    np.savez_compressed(_cache, S=S)
+    S = batched_sample(spec_model, phi); Scal = batched_sample(spec_model, cal["phi"])
+    np.savez_compressed(_cache, S=S, Scal=Scal)
 NP = S.shape[1]
 th_post = priors.from_unit(S[:, :, :3].reshape(-1, 3)).reshape(N, NP, 3)
 th_mean = th_post.mean(1)
+th_cal = priors.from_unit(Scal[:, :, :3].reshape(-1, 3)).reshape(N, NP, 3)
+# per-parameter recalibrated posterior-quantile levels from the calibration PIT
+recal_q = {}
+for p in range(3):
+    u = (th_cal[:, :, p] < cal["theta"][:, p][:, None]).mean(1)
+    recal_q[p] = (float(np.quantile(u, 0.05)), float(np.quantile(u, 0.95)))
 
 # ---------------------------------------------------------------- Fig 1: field
 # pick a representative test case with a mid-range intensity
@@ -90,7 +97,7 @@ print("field.pdf done", flush=True)
 # ------------------------------------------------------------ Fig 2: calibration
 fig, ax = plt.subplots(1, 3, figsize=(7.5, 2.3))
 names = [r"$\beta_0$", r"$\sigma$", r"$\ell$"]
-sbc_p = {}; cov90 = {}; r2 = {}
+sbc_p = {}; cov90 = {}; cov90_post = {}; r2 = {}
 for p in range(3):
     r2[p] = float(1 - ((th_mean[:, p] - theta_true[:, p]) ** 2).sum() /
                   ((theta_true[:, p] - theta_true[:, p].mean()) ** 2).sum())
@@ -104,7 +111,10 @@ for p in range(3):
     sbc_p[p] = float(st.chi2.sf(((cnt - exp) ** 2 / exp).sum(), 19))
     lo = np.quantile(th_post[:, :, p], 0.05, 1); hi = np.quantile(th_post[:, :, p], 0.95, 1)
     cov90[p] = float(((theta_true[:, p] >= lo) & (theta_true[:, p] <= hi)).mean())
-    ax[p].set_title(f"{names[p]}  (90% cov {cov90[p]:.2f})")
+    ql, qh = recal_q[p]                                    # recalibrated 90% interval
+    lo2 = np.quantile(th_post[:, :, p], ql, 1); hi2 = np.quantile(th_post[:, :, p], qh, 1)
+    cov90_post[p] = float(((theta_true[:, p] >= lo2) & (theta_true[:, p] <= hi2)).mean())
+    ax[p].set_title(f"{names[p]}  90% cov {cov90[p]:.2f}$\\to${cov90_post[p]:.2f}")
     ax[p].set_xlabel("rank"); ax[p].set_yticks([])
 fig.tight_layout(); fig.savefig(FIG + "calibration.pdf", bbox_inches="tight"); plt.close(fig)
 print("calibration.pdf done", flush=True)
@@ -176,7 +186,7 @@ coeff_skew = float(np.mean(np.abs(sk)))
 print(f"mean |skew| of low-freq coeff posteriors (low-count third): {coeff_skew:.3f}", flush=True)
 
 # ---------------------------------------------------------------- numbers.tex
-field_corr = json.load(open(R + "spec_eval.json"))["field_corr"]
+field_corr = json.load(open(R + "spec_v2_eval.json"))["field_corr"]
 with open("/home/user/sbi_spatstat/paper_aistats/numbers.tex", "w") as f:
     f.write("\\newcommand{\\FieldCtst}{%.2f}\n" % field_corr)
     f.write("\\newcommand{\\FieldCorr}{%.2f}\n" % field_corr)
@@ -187,6 +197,9 @@ with open("/home/user/sbi_spatstat/paper_aistats/numbers.tex", "w") as f:
     f.write("\\newcommand{\\BetaCov}{%.2f}\n" % cov90[0])
     f.write("\\newcommand{\\SigmaCov}{%.2f}\n" % cov90[1])
     f.write("\\newcommand{\\EllCov}{%.2f}\n" % cov90[2])
+    f.write("\\newcommand{\\BetaCovPost}{%.2f}\n" % cov90_post[0])
+    f.write("\\newcommand{\\SigmaCovPost}{%.2f}\n" % cov90_post[1])
+    f.write("\\newcommand{\\EllCovPost}{%.2f}\n" % cov90_post[2])
     f.write("\\newcommand{\\BetaSbc}{%.2f}\n" % sbc_p[0])
     f.write("\\newcommand{\\BetaRtwo}{%.2f}\n" % r2[0])
     f.write("\\newcommand{\\SigmaRtwo}{%.2f}\n" % r2[1])

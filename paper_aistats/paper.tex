@@ -50,9 +50,9 @@ spectral mass and $G$ the grid resolution. Empirically, grid-free spectral
 conditioning recovers the correlation range better than grid-count amortization
 ($R^2=\EllRtwoSpec$ versus $\EllRtwoGrid$), robustly across grid resolutions --
 the parameter that discretization provably degrades; the field posterior is stable
-under grid refinement; and the parameters are recovered with near-nominal
-interval coverage. We report the current limits on $\sigma$ and especially $\ell$
-interval calibration transparently.
+under grid refinement; and, after a standard post-hoc recalibration, the
+parameters attain near-nominal interval coverage. We are transparent about the one
+residual: strict rank-uniformity for $\ell$ in the sparsest patterns.
 \end{abstract}
 
 \section{Introduction}
@@ -100,11 +100,11 @@ provides such a guarantee.
 range better than an otherwise identical grid-count amortizer
 ($R^2=\EllRtwoSpec$ versus $\EllRtwoGrid$) at every grid resolution we tried -- the
 parameter that discretization provably degrades. The field
-representation is resolution-free and stable under
-grid refinement, and the parameters are recovered with near-nominal coverage. We
-show that the learned coefficient posteriors are non-Gaussian, and we state plainly
-where the method does not yet calibrate ($\sigma$ and especially $\ell$ intervals
-are currently over-confident), rather than hide it.
+representation is resolution-free and stable under grid refinement, and a standard
+post-hoc recalibration brings all three parameters to near-nominal interval
+coverage. We show that the learned coefficient posteriors are non-Gaussian, and we
+state plainly the one calibration target that remains open (strict rank-uniformity
+for $\ell$), rather than hide it.
 \end{itemize}
 
 \section{Background}
@@ -168,10 +168,15 @@ The point pattern is encoded by its low-frequency Fourier features, the
 point-process periodogram
 $\Phi_k(X)=N^{-1/2}\sum_{j}e^{-2\pi i k\cdot s_j}$ for $|k|\le\kappa_\Phi$,
 computed from exact locations with no binning. These are the statistics that
-inform the low-frequency field coefficients. Because the overall level and local
-dispersion are most cheaply read from counts, we also append a coarse
-$10\times10$ log-count grid; the fine-scale information that determines the range
-comes from the grid-free spectral features.
+inform the low-frequency field coefficients. We augment them with two classic
+grid-free second-order summaries, also computed from exact locations: quantiles of
+the nearest-neighbour distance distribution (the empirical $G$-function) and
+intensity-normalised pair-inclusion probabilities $P(\lVert s_i-s_j\rVert<r)$ at a
+set of radii (a Ripley-$K$/pair-correlation summary). These carry precisely the
+short-range structure that determines the correlation range and that a count grid
+discards. Because the overall level and local dispersion are most cheaply read
+from counts, we also append a coarse $10\times10$ log-count grid; all fine-scale
+information that determines the range comes from the grid-free features.
 
 \paragraph{Estimator and training.}
 A feature encoder maps the conditioning statistics to a context vector; a velocity
@@ -183,6 +188,17 @@ the base to obtain posterior samples of $(\theta,z)$, and reconstruct the field
 $Z(s)=\beta_0+\mathrm{Re}\sum_{k\in\mathcal{K}}c_k e^{2\pi i k\cdot s}$ at any
 resolution. Algorithm~1 summarizes training.
 
+\paragraph{Post-hoc recalibration.}
+Amortized posteriors can be over-confident on individual parameters. We correct
+this with a standard, cheap recalibration step that needs no retraining. On a
+held-out calibration set we compute, for each parameter, the probability integral
+transform $u_i=\widehat{\Pr}(\theta<\theta_i^\star\mid X_i)$ from the posterior
+draws; if the posterior is calibrated the $u_i$ are uniform. We form the empirical
+CDF $\widehat G$ of the $u_i$ and replace each nominal credible level $\alpha$ by
+$\widehat G^{-1}(\alpha)$, which widens intervals exactly enough to restore their
+frequentist coverage. The map is one monotone function per parameter, fit once and
+applied to every future dataset.
+
 \vspace{0.4em}
 \noindent\fbox{\parbox{0.95\columnwidth}{\small
 \textbf{Algorithm 1:} Amortized spectral posterior (training).\\[0.2em]
@@ -190,7 +206,7 @@ resolution. Algorithm~1 summarizes training.
 Estimate per-coefficient prior std for whitening.\\
 \textbf{for} each step:\\
 \hspace*{0.8em} sample $\theta\sim p(\theta)$, $f\sim\mathcal{GP}$; simulate pattern $X$;\\
-\hspace*{0.8em} whitened field coeffs $z$; features $c=\mathrm{enc}(\Phi(X),\text{counts})$;\\
+\hspace*{0.8em} whitened field coeffs $z$; features $c=\mathrm{enc}(\Phi(X),\text{2nd-order},\text{counts})$;\\
 \hspace*{0.8em} $x_1{=}(\tilde\theta,z)$, $x_0{\sim}\mathcal N(0,I)$, $t{\sim}U(0,1)$, $x_t{=}(1{-}t)x_0{+}tx_1$;\\
 \hspace*{0.8em} gradient step on $\|v_\phi(x_t,t,c)-(x_1-x_0)\|^2$.\\
 \textbf{Sample:} integrate $\dot x=v_\phi(x,t,c)$ from $x(0)\sim\mathcal N(0,I)$;
@@ -272,10 +288,12 @@ circulant embedding on a $64\times64$ torus. The spectral target keeps
 coefficients up to $|k|_\infty\le6$ ($D=169$ real coefficients), whitened by the
 per-coefficient prior standard deviation so the flow base measure is the GP prior
 in coordinates. We train the conditional flow-matching sampler (Alg.~1) on
-$80{,}000$ simulated patterns and evaluate on a large held-out set. The
-grid-free features are the point-pattern periodogram up to $|k|_\infty\le8$ plus a
-coarse $10\times10$ count anchor. All experiments run on four CPU cores; training
-takes about twelve minutes.
+$80{,}000$ simulated patterns and evaluate on a large held-out set, with a
+disjoint calibration set of the same size for recalibration. The grid-free
+features are the point-pattern periodogram up to $|k|_\infty\le8$, the
+second-order summaries (nearest-neighbour quantiles and pair-inclusion
+probabilities), and a coarse $10\times10$ count anchor. All experiments run on four
+CPU cores.
 
 \paragraph{Correlation-range recovery (the central result).}
 The correlation range $\ell$ is exactly the quantity that binning degrades: a
@@ -331,24 +349,27 @@ where the pattern is sparse.}
 We assess calibration by central-interval coverage and by simulation-based
 calibration (SBC), whose rank histograms should be uniform (Figure~\ref{fig:calib}).
 The parameters are all recovered well in the mean ($R^2$ of $\BetaRtwo$, $\SigmaRtwo$, and
-$\EllRtwoSpec$ for $\beta_0,\sigma,\ell$), and the posterior intervals are close to
-but slightly tighter than nominal: the $90\%$ credible interval covers at
+$\EllRtwoSpec$ for $\beta_0,\sigma,\ell$). Before recalibration the raw posterior
+intervals are slightly tighter than nominal: the $90\%$ credible interval covers at
 $\BetaCov$ for $\beta_0$, $\SigmaCov$ for $\sigma$, and $\EllCov$ for $\ell$, a mild
-and consistent over-confidence that is most pronounced for the range. SBC agrees:
-the histograms for $\beta_0$ and $\sigma$ are close to flat while $\ell$ shows a
-clear central excess, the signature of intervals that are too narrow. This is a
-limitation of the current amortizer, not of the representation: the conditioning
-features locate the parameters but the flow underestimates their spread, most for
-$\ell$. Widening these intervals -- richer features, a heteroscedastic base
-measure, or post-hoc recalibration -- is the clear next step, and we report the
-gap openly rather than tune it away on a single metric.
+over-confidence most pronounced for the range, and the SBC histogram for $\ell$
+shows the corresponding central excess. Applying the post-hoc recalibration of
+Section~\ref{sec:method}, fit on the disjoint calibration set, brings the $90\%$
+coverage to $\BetaCovPost$, $\SigmaCovPost$, and $\EllCovPost$ -- at or very close
+to nominal for all three. We are candid about the residual: recalibration corrects
+interval \emph{width}, so central coverage becomes nominal, but it does not fully
+flatten the $\ell$ rank histogram, whose shape (not only its width) is
+mis-calibrated in the sparsest patterns. Strict SBC-uniformity for $\ell$ is
+therefore the one calibration target still open; near-nominal coverage, the
+quantity practitioners report, is achieved.
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/calibration.pdf}
-\caption{Simulation-based calibration rank histograms with $90\%$ coverage in the
-titles (uniform ranks and the dashed line indicate calibration; grey band is the
-$99\%$ envelope). Coverage is near nominal for all three parameters; the range
-$\ell$ is the most over-confident, a stated limitation.}
+\caption{Simulation-based calibration rank histograms; titles show $90\%$ coverage
+before$\,\to\,$after recalibration (uniform ranks and the dashed line indicate
+calibration; grey band is the $99\%$ envelope). Recalibration brings coverage to
+near nominal for all three parameters; the $\ell$ histogram shape remains mildly
+non-uniform, the one open calibration target.}
 \label{fig:calib}
 \end{figure}
 
@@ -357,8 +378,9 @@ A flow sampler is only warranted if the target departs from a Gaussian, which a
 Laplace or variational-Gaussian field posterior would assume. On the lowest-count
 third of the held-out set -- the regime where the Gaussian approximation is least
 accurate -- the learned posteriors over the low-frequency field coefficients have
-mean absolute skewness $\CoeffSkew$, well away from the zero skewness a Gaussian
-posterior imposes. The flexibility of the flow is therefore used, not incidental.
+mean absolute skewness $\CoeffSkew$, clearly nonzero rather than the exact zero a
+Gaussian or Laplace posterior imposes. The flexibility of the flow is therefore
+used, not incidental.
 
 \paragraph{Resolution consistency.}
 The posterior returns coefficients of a continuous field, so it can be rendered at
@@ -422,10 +444,11 @@ We gave the first amortized posterior over the latent intensity field of a spati
 LGCP, with a prior-aligned spectral target, a non-Gaussian flow-matching sampler,
 and a discretization-consistency guarantee. Its central empirical advantage is
 range recovery: grid-free spectral conditioning resolves the correlation range
-that binning destroys. The main open limitation is interval calibration of the
-covariance parameters $\sigma$ and $\ell$, which are currently over-confident even
-though their point recovery is good; richer conditioning features, a
-heteroscedastic base measure, or post-hoc recalibration are the natural remedies.
+that binning destroys. A standard post-hoc recalibration brings interval coverage
+to near-nominal for all three parameters; the one residual is strict
+rank-uniformity of the range posterior in the sparsest patterns, where the shape,
+not only the width, is mis-calibrated -- a heteroscedastic base measure or a
+learned recalibration map are natural remedies.
 Further limitations include the torus assumption used for the spectral
 diagonalization, the truncation to a low-frequency field, and reliance on the
 simulator being well specified. Extending to non-stationary and non-toroidal
